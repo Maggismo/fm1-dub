@@ -905,6 +905,9 @@ static void voice_chord(void)
     en_chord_n = (uint8_t)chord_nt;
 }
 
+#ifndef EN_BASS_PEDAL
+#define EN_BASS_PEDAL 1                         /* MEDEKAT edition: the bass holds the key's root (see bass_hit) */
+#endif
 static int bass_note(int pc)                    /* E1..Eb2, an octave up or down (E0..Eb1: felt more than heard) */
 {
     return 28 + ((pc - 4) % 12 + 12) % 12 + 12 * par[P_BASSOCT];
@@ -1549,9 +1552,15 @@ static void drums_wait_step(int32_t k)          /* k samples went by: hits whose
 /* ----------------------------------------------------------------- bass --- */
 static void bass_hit(int first, int up)
 {
+#if EN_BASS_PEDAL
+    int pc = par[P_ROOT], n, g = par[P_GROOVE];  /* MEDEKAT: a pedal: the key's root under every chord, so the sub */
+    if ((!first || g == 0) && frand() < (float)par[P_FIFTH] * 0.01f)   /* never rubs against the kick */
+        pc = (par[P_ROOT] + 7) % 12;            /* the key's fifth */
+#else
     int pc = chord_pcs[0], n, g = par[P_GROOVE];
     if ((!first || g == 0) && chord_nt >= 3 && frand() < (float)par[P_FIFTH] * 0.01f)
         pc = chord_pcs[2];                      /* the fifth (with Drone: a whole bar of it) */
+#endif
     n = bass_note(pc);
     if (!first && up)
         n += 12;                                /* now and then, an octave up */
@@ -2655,7 +2664,11 @@ void en_init(void)
     for (i = 0; i < EN_NLOOP; i++)
         loop_pos[i] = 0;
     regrow();
+#if EN_BASS_PEDAL
+    bass.note = bass.target = (float)bass_note(par[P_ROOT]);
+#else
     bass.note = bass.target = (float)bass_note(chord_pcs[0]);
+#endif
     pl_decay = pl_decay_t;
 }
 
