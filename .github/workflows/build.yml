@@ -20,6 +20,8 @@ jobs:
         run: |
           git rev-parse -q --verify v1.0.0 >/dev/null || git tag v1.0.0 6a6b30786d363513d499d363f5959290281cffc2   # (a fork has no tags)
           python3 tools/gen_recipe_prints.py > firmware/src/app/recipe_prints.h
+          python3 tools/gen_edition.py > firmware/src/app/edition.h   # new recipes: every piece starts from them once
+          cat firmware/src/app/edition.h
           grep -c "^    {" firmware/src/app/recipe_prints.h
       - name: JieLi toolchain
         run: sh tools/get_toolchain.sh
