@@ -1099,6 +1099,10 @@ static void oct_hold(void)                       /* one OCT held on: its steps *
     oct_step(b);
 }
 
+#ifndef EN_MIDI_CLOCK_ONLY
+#define EN_MIDI_CLOCK_ONLY 1             /* MEDEKAT edition: ignore incoming notes (a Digitakt on the same thru) */
+#endif
+
 /* MIDI in (USB and the TRS jack): channel 1 notes add or remove their note from the scale; clock and
  * start / stop drive the grid */
 static void midi_in(void)
@@ -1108,8 +1112,12 @@ static void midi_in(void)
         uint32_t st = (pkt >> 8) & 0xFFu, n = (pkt >> 16) & 0x7Fu, v = pkt >> 24;
         if (st == 0xF8u || st == 0xFAu || st == 0xFBu || st == 0xFCu)
             en_clock(st == 0xF8u ? EN_CLK_TICK : st == 0xFAu ? EN_CLK_START : st == 0xFBu ? EN_CLK_CONTINUE : EN_CLK_STOP);
+#if !EN_MIDI_CLOCK_ONLY
         else if (st == 0x90u && v)
             toggle_note((int)(n % 12u));
+#else
+        (void)n; (void)v;                /* MEDEKAT: clock and start / stop only; notes in leave the scale alone */
+#endif
     }
 }
 
