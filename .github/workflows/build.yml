@@ -17,7 +17,10 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install pillow numpy
       - name: "Fingerprints of every past recipe (an untouched piece takes the new one on an update)"
-        run: python3 tools/gen_recipe_prints.py > firmware/src/app/recipe_prints.h
+        run: |
+          git rev-parse -q --verify v1.0.0 >/dev/null || git tag v1.0.0 6a6b30786d363513d499d363f5959290281cffc2   # (a fork has no tags)
+          python3 tools/gen_recipe_prints.py > firmware/src/app/recipe_prints.h
+          grep -c "^    {" firmware/src/app/recipe_prints.h
       - name: JieLi toolchain
         run: sh tools/get_toolchain.sh
       - name: "JieLi AC79 SDK files (vendored in assets/jieli, Apache-2.0; build.py checks their SHA-256)"
