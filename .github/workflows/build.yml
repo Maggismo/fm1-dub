@@ -1,0 +1,47 @@
+name: build-firmware
+# Builds the installable package (build/amb.fwsc) with JieLi's Linux toolchain and, on main,
+# publishes it as a GitHub release: the MEDEKAT edition of DUB-1 (eight dark dub pieces).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  firmware:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install pillow numpy
+      - name: JieLi toolchain
+        run: sh tools/get_toolchain.sh
+      - name: "JieLi AC79 SDK files (vendored in assets/jieli, Apache-2.0; build.py checks their SHA-256)"
+        run: |
+          D=$HOME/fw-AC79_AIoT_SDK/cpu/wl82/tools
+          mkdir -p $D/cfg
+          cp assets/jieli/uboot.boot assets/jieli/cfg_tool.bin $D/
+          cp assets/jieli/eq_cfg_hw.bin $D/cfg/
+      - name: Build the firmware package
+        run: |
+          set +e
+          sh ./build.sh > build.log 2>&1
+          rc=$?
+          tail -n 40 build.log
+          [ $rc -ne 0 ] && echo "::error title=build failed::$(grep -v '^\s*$' build.log | tail -n 40 | cut -c1-220 | sed ':a;N;$!ba;s/\n/%0A/g')"
+          exit $rc
+      - name: Size of the app
+        run: ls -l build/amb.bin build/amb.fwsc build/loader/ota.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dub1-medekat-firmware
+          path: build/amb.fwsc
+      - name: Release (main only)
+        if: github.ref == 'refs/heads/main'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          cp build/amb.fwsc dub1-medekat-${{ github.run_number }}.fwsc
+          gh release create "medekat-${{ github.run_number }}" "dub1-medekat-${{ github.run_number }}.fwsc" \
+            --title "DUB-1 MEDEKAT build ${{ github.run_number }}" \
+            --notes "DUB-1 with eight dark dub pieces (Tiefe, Kammer, Monoton, Nebelbank, Beton, Untergrund, Kaelte, Ruhe). Return to the official V15 first, then install with: python3 tools/fm1_install.py dub1-medekat-${{ github.run_number }}.fwsc. Custom firmware: at your own risk."
