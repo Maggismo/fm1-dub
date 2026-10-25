@@ -12,9 +12,12 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # the whole history: every past recipe gets a fingerprint
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: pip install pillow numpy
+      - name: "Fingerprints of every past recipe (an untouched piece takes the new one on an update)"
+        run: python3 tools/gen_recipe_prints.py > firmware/src/app/recipe_prints.h
       - name: JieLi toolchain
         run: sh tools/get_toolchain.sh
       - name: "JieLi AC79 SDK files (vendored in assets/jieli, Apache-2.0; build.py checks their SHA-256)"

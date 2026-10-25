@@ -43,8 +43,9 @@ static int untouched_now(const slot_t *sl, int piece)   /* as read: an old recip
     uint16_t pool;
     int k, p;
     en_piece(piece, rec, &pool);
-    if (sl->pool != pool)
-        return 0;
+    (void)pool;                                  /* MEDEKAT: the recipes' keys changed between editions, so the saved */
+    if ((unsigned)sl->par[P_MODE] >= EN_NMODES || sl->pool != EN_MODE_POOL[sl->par[P_MODE]])
+        return 0;                                /* scale is checked against its own mode (changed by hand: kept) */
     for (k = 0; k < RECIPE_PRINTS; k++) {
         const int nk = RECIPE_PRINT[k].n;
         if (nk > P_NPARAMS || RECIPE_PRINT[k].h[piece] != print_of(sl->par, nk))
