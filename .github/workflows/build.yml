@@ -23,25 +23,37 @@ jobs:
           mkdir -p $D/cfg
           cp assets/jieli/uboot.boot assets/jieli/cfg_tool.bin $D/
           cp assets/jieli/eq_cfg_hw.bin $D/cfg/
-      - name: Build the firmware package
+      - name: Build the firmware package (release build: the installer checks its identity)
         run: |
           set +e
-          sh ./build.sh > build.log 2>&1
+          sh ./build.sh --release 1.9.0-medekat > build.log 2>&1
           rc=$?
           tail -n 40 build.log
           [ $rc -ne 0 ] && echo "::error title=build failed::$(grep -v '^\s*$' build.log | tail -n 40 | cut -c1-220 | sed ':a;N;$!ba;s/\n/%0A/g')"
           exit $rc
       - name: Size of the app
-        run: ls -l build/amb.bin build/amb.fwsc build/loader/ota.bin
+        run: ls -l build/amb.bin build/dub-1.9.0-medekat.fwsc build/loader/ota.bin
       - uses: actions/upload-artifact@v4
         with:
           name: dub1-medekat-firmware
-          path: build/amb.fwsc
+          path: build/dub-1.9.0-medekat.fwsc
       - name: Release (main only)
         if: github.ref == 'refs/heads/main'
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
-          cp build/amb.fwsc dub1-medekat-${{ github.run_number }}.fwsc
+          cp build/dub-1.9.0-medekat.fwsc dub1-medekat-${{ github.run_number }}.fwsc
           gh release create "medekat-${{ github.run_number }}" "dub1-medekat-${{ github.run_number }}.fwsc" \
             --title "DUB-1 MEDEKAT build ${{ github.run_number }}" \
-            --notes "DUB-1 with eight dark dub pieces (Tiefe, Kammer, Monoton, Nebelbank, Beton, Untergrund, Kaelte, Ruhe). Return to the official V15 first, then install with: python3 tools/fm1_install.py dub1-medekat-${{ github.run_number }}.fwsc. Custom firmware: at your own risk."
+            --notes "DUB-1 with eight dark dub pieces (Tiefe, Kammer, Monoton, Nebelbank, Beton, Untergrund, Kaelte, Ruhe). Install from the web installer: https://maggismo.github.io/fm1-dub/install/ (return to the official V15 first). Custom firmware: at your own risk."
+      - uses: mymindstorm/setup-emsdk@v14
+      - name: "The emulator (the same code in the browser, with these pieces)"
+        run: EN_VERSION=1.9.0-medekat sh web/emu/build.sh
+      - name: Site (installer, emulator, manual)
+        run: python3 tools/make_pages.py build/dub-1.9.0-medekat.fwsc 1.9.0-medekat site
+      - name: Publish the site to the gh-pages branch
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          force_orphan: true
