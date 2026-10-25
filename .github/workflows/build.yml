@@ -23,7 +23,7 @@ jobs:
           mkdir -p $D/cfg
           cp assets/jieli/uboot.boot assets/jieli/cfg_tool.bin $D/
           cp assets/jieli/eq_cfg_hw.bin $D/cfg/
-      - name: Build the firmware package (release build: the installer checks its identity)
+      - name: "Build the firmware package (release build: the installer checks its identity)"
         run: |
           set +e
           sh ./build.sh --release 1.9.0-medekat > build.log 2>&1
