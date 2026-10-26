@@ -98,7 +98,11 @@ static const uint16_t VIEW_KNOB[NVIEWS][4] = {
     {P_KDENS, P_HITS, P_HATSLVL, P_HTONE},       /* (Duck: PERFORM's, a master action) */
     {P_ECHO, P_ETIME, P_FEEDBACK, P_REVERB},
     {P_TUNE, P_MIDI, K_LEDS, K_SAVE},
+#if EN_LIVE
+    {P_CHORD, P_PINGS, P_HATSLVL, P_BASS},       /* (MEDEKAT LIVE: the live layers' levels) */
+#else
     {P_CHORD, P_PINGS, P_BASS, P_DRUMS},
+#endif
     {P_CATT, P_DECAY, P_CCOL, P_CRES},           /* (Env, P_CENV, off the page: the voices and the recipes set it) */
     {P_PTON, P_PRAT, P_PLEN, P_PBEND},
     {P_BBITE, P_BSHAPE, P_BLEN, P_BSLIDE},
@@ -126,7 +130,11 @@ static const char *const KNOB_LABEL[NVIEWS][4] = {
     {"Density", "Hits", "Hats", "Tone"},
     {"Echo", "Echo time", "Feedback", "Reverb"},
     {"Tune", "MIDI out", "Lights", "Save"},
+#if EN_LIVE
+    {"Stabs", "Drone", "Hats", "Sub"},
+#else
     {"Chord", "Pings", "Bass", "Drums"},
+#endif
     {"Attack", "Decay", "Colour", "Reso"},
     {"Tone", "Ratio", "Length", "Bend"},
     {"Bite", "Shape", "Length", "Slide"},
@@ -163,7 +171,11 @@ static const char *const KNOB_HELP[NVIEWS][4] = {
      "How much goes into the plate"},
     {"Fine tuning, in cents", "Notes and clock out over MIDI", "The keys' and buttons' lights",
      "A turn saves all eight pieces"},
+#if EN_LIVE
+    {"The stabs' level", "The drone's level", "The hats' level", "The sub's level"},
+#else
     {"The chord's level", "The pings' level", "The bass's level", "The drums' level"},
+#endif
     {"The strike: a snap, to a swell", "How long each stab rings", "The voice's own colour",
      "The filter's resonance"},
     {"The ping, round to metallic", "The modulator: harmonic to clangy", "How long each ping rings",
@@ -520,10 +532,16 @@ static void knob_text(int k, char *b)
 }
 
 static void set_mode(int m);
+#if EN_LIVE
+static void lv_saved_take(void);
+#endif
 static void do_save(void)                       /* GLO held, or Setup's KNOB 4 turned */
 {
     if (project_save() == 0) {
         ui.dirty = 0;
+#if EN_LIVE
+        lv_saved_take();                         /* (what Total Recall goes back to) */
+#endif
         say("SAVED", 0);
     } else {
         warn("NOT SAVED", "FLASH ERROR");
@@ -681,10 +699,19 @@ static void set_voice(int p, int v)
     mark_dirty();
 }
 
+#if EN_LIVE
+static void lv_key_to(int r);
+#endif
 static void set_piece(int i)                    /* the piece playing kept as it is; piece i as it was left */
 {
+#if EN_LIVE
+    const int r0 = proj.par[P_ROOT];             /* (LIVE: one key for every piece) */
+#endif
     project_piece(i);
     project_apply();
+#if EN_LIVE
+    lv_key_to(r0);
+#endif
     en_seed(plat_ms());
     en_regrow();
     say_as("PIECE", piece_name(proj.piece), 0);
@@ -783,32 +810,53 @@ static void perf_key(uint32_t key, int down)
 /* --------------------------------------------------------------- LIVE --- */
 /* MEDEKAT LIVE (SEL's mode, and where the FM-1 starts): four layers, each a sequence of sixteen steps rolled by a
  * key, inside guard rails (the key's notes, a register, a density), and set going on the next bar:
- *   black 1-4   the layers on and off: Stabs, Drone (with its noise bed), Hats, Sub; one held, the knobs its level
- *   white 1-4   a new variation of that layer (the drone's: a new chord, under the stabs too)
- *   white 5 all four new · white 6 back to the variation before (again: forward, an A/B) · white 7 save
- *   knobs       Filter, Echo, Density, Variation (how far a roll strays) · OCT- / OCT+ the key a semitone down / up
+ *   black 1-4   the layers on and off, on the next bar: Stabs, Drone (with its noise bed), Hats, Sub; one held, the
+ *               knobs its level
+ *   white 1-4   a tap: a new sequence for that layer (the drone's: a new chord, under the stabs too); held: its sound
+ *   G#4 A#4 C#5 D#5  snapshots 1-4: held, stored; a tap, back on the next bar
+ *   C5 held: the drop (no sub, no hats) · D5 Total Recall · E5 all new · F5 back (again: forward) · F#5 Auto · G5 save
+ *   knobs       Filter, Echo, Density, Variation (how far a roll strays); GLO: the four levels instead (MIX)
+ *   OCT- / OCT+ the key a semitone down / up, for every piece
  * The kick is never heard (the Digitakt plays it): its mute is always on */
 #define LV_N 4
-static const uint8_t LV_BLACK[LV_N] = {1, 3, 5, 8}, LV_WHITE[LV_N] = {0, 2, 4, 6};
-#define LV_ALL 7u
-#define LV_BACK 9u
-#define LV_SAVE 11u
+static const uint8_t LV_BLACK[LV_N] = {1, 3, 5, 8}, LV_WHITE[LV_N] = {0, 2, 4, 6}, LV_SNAPK[4] = {15, 17, 20, 22};
+#define LV_DROP 19u                              /* C5, held */
+#define LV_RECALL 21u                            /* D5 */
+#define LV_ALL 23u                               /* E5 */
+#define LV_BACK 24u                              /* F5 */
+#define LV_AUTO 25u                              /* F#5 */
+#define LV_SAVE 26u                              /* G5 */
+#define LV_HOLD 500u                             /* ms: a white key's hold (its sound), a snapshot's (stored) */
+#define LV_DROPM (EN_M_BASS | EN_M_HATS)
 static const char *const LV_NAME[LV_N] = {"STABS", "DRONE", "HATS", "SUB"};
 static const uint32_t LV_MUTE[LV_N] = {EN_M_CHORD, EN_M_PINGS | EN_M_NOISE, EN_M_HATS, EN_M_BASS};
 static const uint8_t LV_LEVEL[LV_N] = {P_CHORD, P_PINGS, P_HATSLVL, P_BASS};
-static const uint8_t LV_PARS[] = {P_LSTAB, P_CR0, P_CQ0, P_CX0,
-                                  P_DPAT1, P_DPAT2, P_DPAT3, P_DACC1, P_DACC2, P_DACC3, P_DCH1, P_DCH2, P_DCH3,
-                                  P_GROOVE, P_FIFTH, P_BNOTES, P_LBSEED};
+/* what the rolls set, a layer's in turn (its sequence, then its sound), then the four levels: BACK swaps the rolled
+ * ones, a snapshot and the saved state hold them all */
+static const uint8_t LV_PARS[] = {
+    P_LSTAB, P_CUTOFF, P_DECAY, P_CCOL, P_CRES, P_CATT, P_CVOICE,
+    P_CR0, P_CQ0, P_CX0, P_PTON, P_PLEN, P_PBEND,
+    P_DPAT1, P_DPAT2, P_DPAT3, P_DACC1, P_DACC2, P_DACC3, P_DCH1, P_DCH2, P_DCH3, P_KIT, P_HTONE, P_HLEN,
+    P_GROOVE, P_FIFTH, P_BNOTES, P_LBSEED, P_BSHAPE, P_BLEN, P_BSLIDE, P_BBITE,
+    P_CHORD, P_PINGS, P_HATSLVL, P_BASS};
+static const uint8_t LV_FIRST[LV_N + 1] = {0, 7, 13, 25, 33};
+#define LV_NR 33                                 /* (the rolled ones) */
 #define LV_NP ((int)sizeof LV_PARS)
-static int16_t lv_prev[LV_NP], lv_pend[LV_NP];
-static uint32_t lv_pmask;                        /* the parameters waiting for the next bar */
-static uint8_t lv_has_prev, lv_held;             /* (lv_held: the black keys down, a knob then their level) */
-static uint32_t lv_rng = 0x9E3779B9u, lv_bar, lv_flash_t[LV_N];
+_Static_assert(sizeof LV_PARS == 37u, "LV_FIRST and LV_NR follow LV_PARS");
+_Static_assert(sizeof LV_PARS <= LIVE_SNAP_N, "a snapshot holds every live parameter");
+static int16_t lv_prev[LV_NP], lv_pend[LV_NP], lv_saved[NPIECES][LV_NP], lv_saved_root[NPIECES];
+static uint64_t lv_pmask;                        /* the parameters waiting for the next bar */
+static uint32_t lv_mpend, lv_mset, lv_drop_m;    /* mutes to flip on the next bar; a snapshot's; the drop's before */
+static uint8_t lv_has_prev, lv_held, lv_turned, lv_saved_ok, lv_auto, lv_drop, lv_drop_rel, lv_mset_ok, lv_center;
+static uint32_t lv_rng = 0x9E3779B9u, lv_bar, lv_flash_t[LV_N], lv_down_t[32], lv_wait;   /* (lv_wait: the white
+                                                  * and snapshot keys down, their tap or hold still to come) */
 static uint32_t lv_r(uint32_t n)                 /* 0 .. n-1 */
 {
     lv_rng ^= lv_rng << 13, lv_rng ^= lv_rng >> 17, lv_rng ^= lv_rng << 5;
     return n ? lv_rng % n : 0u;
 }
+static int lv_rr(int lo, int hi) { return lo + (int)lv_r((uint32_t)(hi - lo + 1)); }
+static int lv_clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 static int lv_idx(int p)
 {
     int i;
@@ -822,6 +870,7 @@ static int16_t lv_now(int p)                     /* as it will be: waiting, or p
     int i = lv_idx(p);
     return i >= 0 && (lv_pmask >> i & 1u) ? lv_pend[i] : proj.par[p];
 }
+static int lv_pending(void) { return lv_pmask || lv_mpend || lv_drop_rel || lv_mset_ok || lv_center; }
 static void lv_put(int p, int v)                 /* for the next bar (the first of a roll: the one before kept) */
 {
     int i = lv_idx(p);
@@ -834,7 +883,12 @@ static void lv_put(int p, int v)                 /* for the next bar (the first 
         lv_has_prev = 1;
     }
     lv_pend[i] = (int16_t)v;
-    lv_pmask |= 1u << i;
+    lv_pmask |= (uint64_t)1u << i;
+}
+static void lv_mutes(void)
+{
+    ui.mutes |= EN_M_KICK;                       /* (the Digitakt plays the kick) */
+    perf_mutes();
 }
 static void lv_apply(void)                       /* the bar's first sixteenth (or at once, at rest) */
 {
@@ -843,26 +897,67 @@ static void lv_apply(void)                       /* the bar's first sixteenth (o
         if (lv_pmask >> i & 1u)
             knob_set(LV_PARS[i], lv_pend[i]);
     lv_pmask = 0;
+    if (lv_center) {                             /* (Total Recall: the playing knobs back to the middle) */
+        knob_set(K_FILTER, 0);
+        knob_set(K_DUB, 0);
+        knob_set(K_ENERGY, 0);
+        lv_center = 0;
+    }
+    if (lv_mset_ok) {
+        ui.mutes = lv_mset;
+        lv_mset_ok = 0;
+    }
+    ui.mutes ^= lv_mpend;
+    lv_mpend = 0;
+    if (lv_drop_rel) {                           /* the drop let go: the sub and the hats back as they were */
+        ui.mutes = (ui.mutes & ~LV_DROPM) | lv_drop_m;
+        lv_drop_rel = 0;
+    }
+    lv_mutes();
+}
+static void lv_soon(void)                        /* at rest: now */
+{
+    if (!en_playing)
+        lv_apply();
 }
 static int16_t lv_i16(uint32_t m) { return (int16_t)(uint16_t)m; }
 static int lv_bits(uint32_t m) { int c = 0; for (; m; m &= m - 1u) c++; return c; }
+static int lv_home(int p)                        /* the piece's own, as last saved */
+{
+    int i = lv_idx(p);
+    return lv_saved_ok && i >= 0 ? lv_saved[proj.piece][i] : proj.par[p];
+}
+static void lv_near(int p, int spread, int lo, int hi, int dev)   /* a sound: near its saved value, in rails */
+{
+    const int s = spread * (30 + dev) / 130;
+    lv_put(p, lv_clamp(lv_home(p) + lv_rr(-s, s), lo, hi));
+}
 
-/* the stabs: one to five a bar, the offbeat eighths likeliest, the sixteenths between them as Variation rises, the
- * beat itself seldom; never two side by side */
+/* the stabs: a figure (a dub offbeat, a push, threes) or one grown afresh: the offbeat eighths likeliest, the
+ * sixteenths between them as Variation rises, the beat itself seldom; never two side by side; as many as Density */
 static void lv_roll_stabs(int dev)
 {
+    static const uint16_t FIG[10] = {0x0444, 0x4444, 0x0484, 0x2488, 0x0924, 0x4048, 0x0204, 0x1044, 0x4404, 0x0A04};
     int k = 1 + (proj.par[P_STABS] * 5 + 50) / 100, n = 0, tries = 0;
-    uint32_t m = 0;
+    uint32_t m = 0, old = (uint16_t)lv_now(P_LSTAB);
     if (dev > 40)
         k += (int)lv_r(3) - 1;
     k = k < 1 ? 1 : k > 5 ? 5 : k;
-    while (n < k && tries++ < 200) {
-        int st = (int)lv_r(16), w;
-        w = (st & 3) == 2 ? 60 : (st & 1) ? 15 + dev / 3 : st == 0 ? 2 : 4 + dev / 6;
-        if ((int)lv_r(60) >= w || (m >> st & 1u) || (m >> ((st + 1) & 15) & 1u) || (m >> ((st + 15) & 15) & 1u))
-            continue;
-        m |= 1u << st;
-        n++;
+    if (lv_r(100) < 55u) {
+        do
+            m = FIG[lv_r(dev < 35 ? 5u : 10u)];
+        while (m == old && tries++ < 6);
+        while (lv_bits(m) > k)
+            m &= ~(1u << lv_r(16));
+    } else {
+        while (n < k && tries++ < 200) {
+            int st = (int)lv_r(16), w;
+            w = (st & 3) == 2 ? 60 : (st & 1) ? 15 + dev / 3 : st == 0 ? 2 : 4 + dev / 6;
+            if ((int)lv_r(60) >= w || (m >> st & 1u) || (m >> ((st + 1) & 15) & 1u) || (m >> ((st + 15) & 15) & 1u))
+                continue;
+            m |= 1u << st;
+            n++;
+        }
     }
     if (!m)
         m = 1u << 2;
@@ -872,9 +967,10 @@ static void lv_roll_stabs(int dev)
 /* the drone (and the stabs over it): a chord of the key's own, near home while Variation is low */
 static void lv_roll_chord(int dev)
 {
-    static const int8_t CH[8][3] = {{0, 2, 2}, {0, 2, 4}, {0, 2, 5}, {8, 1, 3}, {3, 1, 3}, {5, 2, 2}, {10, 4, 2},
-                                    {7, 2, 2}};   /* (Cm7 Cm9 Cm11 AbM7 EbM7 Fm7 Bb7sus4 Gm7, in C) */
-    const int r = proj.par[P_ROOT], span = dev < 35 ? 3 : dev < 70 ? 6 : 8;
+    static const int8_t CH[13][3] = {{0, 2, 2}, {0, 2, 4}, {0, 2, 5}, {8, 1, 3}, {3, 1, 3}, {5, 2, 2}, {5, 2, 4},
+                                     {8, 1, 6}, {3, 1, 6}, {10, 4, 2}, {7, 2, 2}, {5, 2, 5}, {0, 3, 0}};
+    /* (in C: Cm7 Cm9 Cm11 · AbM7 EbM7 Fm7 Fm9 Abadd9 Ebadd9 · Bb7sus4 Gm7 Fm11 Csus2) */
+    const int r = proj.par[P_ROOT], span = dev < 35 ? 3 : dev < 70 ? 9 : 13;
     int i, tries = 0;
     do
         i = (int)lv_r((uint32_t)span);
@@ -884,17 +980,20 @@ static void lv_roll_chord(int dev)
     lv_put(P_CX0, CH[i][2]);
 }
 
-/* the hats: a shaker on the sixteenths off the beat (a few out), the open hat on the offbeats, a rim or two */
+/* the hats: a shaker figure off the beat (a few out), the open hat on the offbeats, a rim or two */
 static void lv_roll_hats(int dev)
 {
-    static const uint16_t SHK[4] = {0xEEEE, 0xAAAA, 0xEEEE, 0x6E6E}, OPN[5] = {0x4444, 0x4444, 0x4040, 0x0404, 0x4454};
+    static const uint16_t SHK[8] = {0xEEEE, 0xAAAA, 0xEAEA, 0x6E6E, 0xAEAE, 0x2A2A, 0xEEAE, 0x2222},
+                          OPN[7] = {0x4444, 0x4444, 0x4040, 0x0404, 0x4454, 0x4C44, 0x4000};
     static const uint8_t RIM[7] = {4, 12, 7, 14, 10, 13, 3};
-    uint32_t sh = SHK[lv_r(dev < 50 ? 2 : 4)], op = OPN[lv_r(dev < 40 ? 2 : 5)], rim = 0;
+    uint32_t sh = SHK[lv_r(dev < 35 ? 3u : dev < 70 ? 6u : 8u)], op = OPN[lv_r(dev < 40 ? 3u : 7u)], rim = 0;
     int drop = (int)lv_r((uint32_t)(1 + dev / 25)), i;
     for (i = 0; i < drop; i++)
         sh &= ~(1u << lv_r(16));
-    if (lv_r(100) < 50u)
+    if (lv_r(100) < 45u)
         rim = 1u << 4 | 1u << 12;
+    else if (lv_r(100) < 15u)
+        rim = 0;
     else
         for (i = 1 + (int)lv_r(2); i > 0; i--)
             rim |= 1u << RIM[lv_r(dev < 50 ? 4 : 7)];
@@ -902,6 +1001,7 @@ static void lv_roll_hats(int dev)
     lv_put(P_DPAT2, lv_i16(op));
     lv_put(P_DPAT3, lv_i16(rim));
     lv_put(P_DACC1, lv_i16(lv_r(2) ? 0x4444u : 0x2222u));
+    lv_put(P_DCH1, 85 + (int)lv_r(16));
     lv_put(P_DCH2, 75 + (int)lv_r(26));
     lv_put(P_DCH3, 55 + (int)lv_r(41));
 }
@@ -916,11 +1016,43 @@ static void lv_roll_sub(int dev)
     lv_put(P_LBSEED, 1 + (int)lv_r(9999));
 }
 
-static void lv_roll(int layer)
+/* a layer's sound, near the piece's own and inside rails: nothing shrill, no bells, the sub kept soft */
+static void lv_roll_sound(int l, int dev)
 {
-    const int dev = proj.par[P_LDEV];
+    if (l == 0) {
+        lv_near(P_CUTOFF, 10, 5, 40, dev);
+        lv_near(P_DECAY, 22, 30, 100, dev);
+        lv_near(P_CCOL, 16, -15, 40, dev);
+        lv_near(P_CRES, 12, -30, 12, dev);
+        lv_put(P_CATT, lv_r(10) < 7u ? 0 : lv_rr(0, 5 + dev / 4));
+        lv_put(P_CVOICE, dev >= 50 && lv_r(4) == 0u ? (lv_home(P_CVOICE) == 3 ? 0 : 3) : lv_home(P_CVOICE));
+    } else if (l == 1) {
+        lv_near(P_PTON, 22, -35, 25, dev);
+        lv_near(P_PLEN, 28, -25, 45, dev);
+        lv_near(P_PBEND, 22, 5, 55, dev);
+    } else if (l == 2) {
+        static const uint8_t KIT[4] = {0, 1, 3, 4};   /* (Tight, Deep, Soft, Dusty) */
+        int k, tries = 0;
+        do
+            k = KIT[lv_r(4)];
+        while (k == lv_now(P_KIT) && tries++ < 6);
+        lv_put(P_KIT, k);
+        lv_put(P_HTONE, lv_rr(-50, -18));
+        lv_near(P_HLEN, 30, -20, 60, dev);
+    } else {
+        lv_near(P_BSHAPE, 10, -40, -10, dev);
+        lv_near(P_BLEN, 16, -20, 30, dev);
+        lv_near(P_BSLIDE, 16, 0, 40, dev);
+        lv_near(P_BBITE, 6, -15, 5, dev);
+    }
+}
+
+static void lv_roll(int layer, int sound, int dev)
+{
     lv_rng ^= plat_ms() * 2654435761u;
-    if (layer == 0)
+    if (sound)
+        lv_roll_sound(layer, dev);
+    else if (layer == 0)
         lv_roll_stabs(dev);
     else if (layer == 1)
         lv_roll_chord(dev);
@@ -929,64 +1061,212 @@ static void lv_roll(int layer)
     else
         lv_roll_sub(dev);
     lv_flash_t[layer] = plat_ms();
-    if (!en_playing)
-        lv_apply();
-    say(LV_NAME[layer], "NEW");
+    lv_soon();
 }
 
 static void lv_back(void)                        /* the variation before; again: the one after (an A/B) */
 {
-    int16_t now[LV_NP];
+    int16_t now[LV_NR];
     int i;
     if (!lv_has_prev)
         return;
-    for (i = 0; i < LV_NP; i++)
+    for (i = 0; i < LV_NR; i++)
         now[i] = lv_now(LV_PARS[i]);
-    for (i = 0; i < LV_NP; i++) {
+    for (i = 0; i < LV_NR; i++) {
         lv_pend[i] = lv_prev[i];
         lv_prev[i] = now[i];
     }
-    lv_pmask = (1u << LV_NP) - 1u;
-    if (!en_playing)
-        lv_apply();
+    lv_pmask |= ((uint64_t)1u << LV_NR) - 1u;
+    lv_soon();
     say("BACK", 0);
 }
 
-static void lv_mutes(void)
+static void lv_saved_take(void)                  /* what Total Recall goes back to: every piece as saved */
 {
-    ui.mutes |= EN_M_KICK;                       /* (the Digitakt plays the kick) */
-    perf_mutes();
+    int p, i;
+    for (p = 0; p < NPIECES; p++) {
+        const int16_t *src = p == proj.piece ? proj.par : proj.slot[p].par;
+        for (i = 0; i < LV_NP; i++)
+            lv_saved[p][i] = src[LV_PARS[i]];
+        lv_saved_root[p] = src[P_ROOT];
+    }
+    lv_saved_ok = 1;
+}
+
+static void lv_put_all(const int16_t *v, int root)   /* a whole state, its chord moved into the key playing */
+{
+    const int d = proj.par[P_ROOT] - root;
+    int i;
+    for (i = 0; i < LV_NP; i++)
+        lv_put(LV_PARS[i], LV_PARS[i] == P_CR0 ? ((v[i] + d) % 12 + 12) % 12 : v[i]);
+}
+
+static void lv_recall(void)                      /* Total Recall: the piece as last saved, the knobs centred */
+{
+    if (!lv_saved_ok)
+        lv_saved_take();
+    lv_put_all(lv_saved[proj.piece], lv_saved_root[proj.piece]);
+    lv_center = 1;
+    lv_soon();
+    card_show("RECALL", "as saved, on the next bar", K_ACC, 0);
+    say("TOTAL", "RECALL");
+}
+
+static void lv_snap_store(int s)
+{
+    int i;
+    for (i = 0; i < LV_NP; i++)
+        proj.snap[s][i] = lv_now(LV_PARS[i]);
+    proj.snap_mutes[s] = (lv_mset_ok ? lv_mset : ui.mutes) ^ lv_mpend;
+    proj.snap_piece[s] = proj.piece;
+    proj.snap_root[s] = (uint8_t)proj.par[P_ROOT];
+    proj.snap_ok |= (uint8_t)(1u << s);
+    mark_dirty();
+    {
+        static const char *const N[4] = {"SNAP 1", "SNAP 2", "SNAP 3", "SNAP 4"};
+        card_show(N[s], "stored", K_ACC, 0);
+        say(N[s], "STORED");
+    }
+}
+
+static void set_piece(int i);
+static void lv_snap_recall(int s)
+{
+    static const char *const N[4] = {"SNAP 1", "SNAP 2", "SNAP 3", "SNAP 4"};
+    if (!(proj.snap_ok >> s & 1u)) {
+        say(N[s], "EMPTY");
+        card_show(N[s], "empty: hold to store", K_FROST, 0);
+        return;
+    }
+    if (proj.snap_piece[s] != proj.piece && proj.snap_piece[s] < NPIECES) {
+        set_piece(proj.snap_piece[s]);           /* (another piece: at once, as a piece change is) */
+        lv_put_all(proj.snap[s], proj.snap_root[s]);
+        lv_mset = proj.snap_mutes[s] | EN_M_KICK;
+        lv_mset_ok = 1;
+        lv_apply();
+    } else {
+        lv_put_all(proj.snap[s], proj.snap_root[s]);
+        lv_mset = proj.snap_mutes[s] | EN_M_KICK;
+        lv_mset_ok = 1;
+        lv_soon();
+    }
+    card_show(N[s], "on the next bar", K_ACC, 0);
+    say(N[s], 0);
+}
+
+static void lv_mute(int l)                       /* a layer on or off, on the next bar */
+{
+    if (lv_drop && (LV_MUTE[l] & LV_DROPM)) {    /* (in the drop: how it comes back) */
+        lv_drop_m ^= LV_MUTE[l];
+        say(LV_NAME[l], lv_drop_m & LV_MUTE[l] ? "OFF" : "ON");
+        return;
+    }
+    lv_mpend ^= LV_MUTE[l];
+    lv_soon();
+    say(LV_NAME[l], ((ui.mutes ^ lv_mpend) & LV_MUTE[l]) ? "OFF" : "ON");
+}
+static uint32_t lv_mutes_next(void)              /* the mutes as they will be */
+{
+    uint32_t m = (lv_mset_ok ? lv_mset : ui.mutes) ^ lv_mpend;
+    if (lv_drop)
+        m |= LV_DROPM;
+    else if (lv_drop_rel)
+        m = (m & ~LV_DROPM) | lv_drop_m;
+    return m;
+}
+
+static void lv_all(void)
+{
+    int l;
+    const int dev = proj.par[P_LDEV];
+    for (l = 0; l < LV_N; l++) {
+        lv_roll(l, 0, dev);
+        lv_roll(l, 1, dev);
+    }
+    say("ALL", "NEW");
+    card_show("ALL NEW", "on the next bar", K_ACC, 0);
+}
+
+static void lv_tap(uint32_t key)                 /* a white or snapshot key let go before its hold */
+{
+    int i;
+    for (i = 0; i < LV_N; i++)
+        if (key == LV_WHITE[i]) {
+            lv_roll(i, 0, proj.par[P_LDEV]);
+            say(LV_NAME[i], "NEW");
+        }
+    for (i = 0; i < 4; i++)
+        if (key == LV_SNAPK[i])
+            lv_snap_recall(i);
+}
+static void lv_hold(uint32_t key)                /* held on: a layer's sound; a snapshot stored */
+{
+    int i;
+    for (i = 0; i < LV_N; i++)
+        if (key == LV_WHITE[i]) {
+            lv_roll(i, 1, proj.par[P_LDEV]);
+            say(LV_NAME[i], "NEW SOUND");
+        }
+    for (i = 0; i < 4; i++)
+        if (key == LV_SNAPK[i])
+            lv_snap_store(i);
 }
 
 static void live_key(uint32_t key, int down)
 {
     int i;
+    if (key < 32u && down)
+        lv_down_t[key] = plat_ms();
     for (i = 0; i < LV_N; i++)
-        if (key == LV_BLACK[i]) {
+        if (key == LV_BLACK[i]) {                /* a tap: on or off (held with a knob turned: its level, no mute) */
             if (down) {
                 lv_held |= (uint8_t)(1u << i);
-                ui.mutes ^= LV_MUTE[i];
-                lv_mutes();
-                say(LV_NAME[i], ui.mutes & LV_MUTE[i] ? "OFF" : "ON");
+                lv_turned &= (uint8_t)~(1u << i);
             } else {
                 lv_held &= (uint8_t)~(1u << i);
+                if (!(lv_turned >> i & 1u))
+                    lv_mute(i);
             }
             return;
         }
-    if (!down)
-        return;
     for (i = 0; i < LV_N; i++)
-        if (key == LV_WHITE[i]) {
-            lv_roll(i);
+        if (key == LV_WHITE[i] || (i < 4 && key == LV_SNAPK[i])) {
+            if (down)
+                lv_wait |= 1u << key;
+            else if (lv_wait >> key & 1u) {
+                lv_wait &= ~(1u << key);
+                lv_tap(key);
+            }
             return;
         }
+    if (key == LV_DROP) {
+        if (down) {
+            lv_drop_m = lv_mutes_next() & LV_DROPM;   /* (how the sub and the hats were, before it) */
+            lv_drop = 1;
+            lv_drop_rel = 0;
+            lv_mpend &= ~LV_DROPM;
+            ui.mutes |= LV_DROPM;
+            lv_mutes();
+            say("DROP", 0);
+        } else if (lv_drop) {
+            lv_drop = 0;
+            lv_drop_rel = 1;
+            lv_soon();
+        }
+        return;
+    }
+    if (!down)
+        return;
     if (key == LV_ALL) {
-        for (i = 0; i < LV_N; i++)
-            lv_roll(i);
-        say("ALL", "NEW");
-        card_show("ALL NEW", "on the next bar", K_ACC, 0);
+        lv_all();
     } else if (key == LV_BACK) {
         lv_back();
+    } else if (key == LV_RECALL) {
+        lv_recall();
+    } else if (key == LV_AUTO) {
+        lv_auto ^= 1u;
+        say("AUTO", lv_auto ? "ON" : "OFF");
+        card_show("AUTO", lv_auto ? "a layer anew every 16 bars" : "off", K_ACC, 0);
     } else if (key == LV_SAVE) {
         lv_apply();
         do_save();
@@ -996,25 +1276,65 @@ static void live_key(uint32_t key, int down)
 
 static void lv_key_shift(int d)                  /* OCT- / OCT+: the key a semitone down or up, the chord with it */
 {
-    const int r = (proj.par[P_ROOT] + d + 12) % 12;
+    const int r = (proj.par[P_ROOT] + d + 12) % 12, ic = lv_idx(P_CR0);
     knob_set(P_ROOT, r);
     if (proj.par[P_CQ0])
         knob_set(P_CR0, (proj.par[P_CR0] + d + 12) % 12);
-    if (lv_pmask >> 1 & 1u)
-        lv_pend[1] = (int16_t)((lv_pend[1] + d + 12) % 12);
+    if (lv_pmask >> ic & 1u)
+        lv_pend[ic] = (int16_t)((lv_pend[ic] + d + 12) % 12);
     say("KEY", EN_NOTE_NAME[r]);
 }
 
-static void lv_tick(void)                        /* each frame: the waiting variations on the bar's first sixteenth */
+static void lv_key_to(int r)                     /* a piece changed: the key kept, the piece's chords moved to it */
 {
-    const uint32_t b = en_bars / 16u;
-    if (!lv_pmask)
+    const int d = r - proj.par[P_ROOT];
+    int s;
+    lv_pmask = 0;                                /* (the old piece's waiting rolls: gone) */
+    lv_has_prev = 0;
+    if (!d)
+        return;
+    knob_set(P_ROOT, r);
+    for (s = 0; s < 8; s++)
+        if (proj.par[P_CQ0 + s])
+            knob_set(P_CR0 + s, ((proj.par[P_CR0 + s] + d) % 12 + 12) % 12);
+}
+
+static void lv_tick(void)                        /* each frame: holds, and what waits for the bar's first sixteenth */
+{
+    const uint32_t b = en_bars / 16u, now = plat_ms();
+    uint32_t k;
+    if (!lv_saved_ok)
+        lv_saved_take();
+    for (k = 0; k < 32u; k++)
+        if ((lv_wait >> k & 1u) && now - lv_down_t[k] >= LV_HOLD) {
+            lv_wait &= ~(1u << k);
+            lv_hold(k);
+        }
+    if (!en_playing) {
+        if (lv_pending())
+            lv_apply();
         lv_bar = b;
-    else if (!en_playing || b != lv_bar) {
-        lv_bar = b;
+        return;
+    }
+    if (b == lv_bar)
+        return;
+    lv_bar = b;
+    if (lv_pending())
         lv_apply();
+    if (lv_auto && (b & 15u) == 15u) {           /* Auto: a layer that sounds, its sequence a little anew, on the
+                                                  * sixteenth bar's end */
+        int l = (int)lv_r(LV_N), t;
+        for (t = 0; t < LV_N && (ui.mutes & LV_MUTE[l]); t++)
+            l = (l + 1) % LV_N;
+        if (t < LV_N)
+            lv_roll(l, 0, proj.par[P_LDEV] * 2 / 3);
     }
 }
+#endif
+#if EN_LIVE
+#define MIX_MUTE(i) LV_MUTE[i]
+#else
+#define MIX_MUTE(i) LAYER_MUTE[i]
 #endif
 
 static void set_view(int v);
@@ -1199,6 +1519,11 @@ static void button(int b)
         } else {
             perf_set(1);
         }
+        return;
+    }
+    if (ui.perf && b == B_GLO) {                 /* LIVE: GLO, the knobs the four levels (MIX) and back */
+        set_view(ui.view == V_MIX ? V_PERF : V_MIX);
+        say("MIX", ui.view == V_MIX ? "ON" : "OFF");
         return;
     }
     if (ui.perf && b != B_PLAY && b != B_REC)
@@ -1783,6 +2108,7 @@ static void input(void)
                 for (l = 0; l < LV_N && !(lv_held >> l & 1u); l++)
                     ;
                 turn(EN_K1 + (int)i, LV_LEVEL[l], e);
+                lv_turned |= lv_held;
                 say(LV_NAME[l], "LEVEL");
                 ui.act_t = ui.turn_t = plat_ms();
                 continue;
@@ -2899,24 +3225,21 @@ static void draw_live(void)
 {
     static const uint16_t COL[LV_N] = {K_PAD, K_BELL, K_PULSE, K_BASS};
     const int pos = en_drum_pos[0];
+    const uint32_t mn = lv_mutes_next();
     int l, i;
     for (l = 0; l < LV_N; l++) {
         const int32_t y = 2 + l * 31, on = !(ui.mutes & LV_MUTE[l]);
         const uint16_t c = on ? COL[l] : K_DIM;
-        const int flash = lv_flash_t[l] && plat_ms() - lv_flash_t[l] < 350u;
-        uint32_t wait = 0;
+        const int flash = lv_flash_t[l] && plat_ms() - lv_flash_t[l] < 350u, lvl = proj.par[LV_LEVEL[l]];
+        const uint64_t lm = (((uint64_t)1u << LV_FIRST[l + 1]) - ((uint64_t)1u << LV_FIRST[l])) |
+                            (uint64_t)1u << (LV_NR + l);
+        const int wait = (lv_pmask & lm) || ((mn ^ ui.mutes) & LV_MUTE[l]);
         cv_round(2, y, 236, 28, 5, flash ? mix(K_BG, COL[l], 6) : on ? mix(K_BG, K_PANEL, 12) : K_BG);
-        cv_text(8, y + 6, &FONT_B, LV_NAME[l], c);
-        if (l == 0)
-            wait = lv_pmask & 1u;
-        else if (l == 1)
-            wait = lv_pmask & 0xEu;
-        else if (l == 2)
-            wait = lv_pmask & 0x1FF0u;
-        else
-            wait = lv_pmask & 0x1E000u;
-        if (wait)
-            cv_text(8, y + 19, &FONT_XS, (plat_ms() / 200u) & 1u ? "NEXT" : "", K_TEXT);
+        cv_text(8, y + 4, &FONT_B, LV_NAME[l], c);
+        cv_rect(8, y + 22, 60, 2, K_LINE);       /* its level, always in sight */
+        cv_rect(8, y + 22, lv_clamp(lvl, 0, 100) * 60 / 100, 2, ui.view == V_MIX ? K_TEXT : c);
+        if (wait && (plat_ms() / 200u) & 1u)
+            cv_text(46, y + 4, &FONT_XS, "NEXT", K_TEXT);
         if (l == 1) {                            /* the drone: its chord */
             char nm[12];
             cv_text(96, y + 6, &FONT_B, chord_now(nm), c);
@@ -2948,8 +3271,21 @@ static void draw_live(void)
                 cv_rect(x + 4, y + 13, 2, 2, (i & 3) ? K_LINE : K_DIM);
         }
     }
-    text_c(120, 128, &FONT_XS, en_playing ? "C4 ALL  D4 BACK  E4 SAVE  OCT KEY" : "PRESS PLAY, OR START THE DIGITAKT",
-           en_playing ? K_DIM : K_ACC);
+    if (!en_playing) {
+        text_c(120, 128, &FONT_XS, "PRESS PLAY, OR START THE DIGITAKT", K_ACC);
+        return;
+    }
+    for (i = 0; i < 4; i++) {                    /* the snapshots: filled when stored */
+        static const char *const D[4] = {"1", "2", "3", "4"};
+        const int st = proj.snap_ok >> i & 1u;
+        cv_round(8 + i * 16, 126, 13, 13, 3, st ? K_ACC : K_LINE);
+        cv_text(12 + i * 16, 128, &FONT_XS, D[i], st ? K_BG : K_DIM);
+    }
+    cv_text(80, 128, &FONT_XS, "AUTO", lv_auto ? K_ACC : K_DIM);
+    cv_text(118, 128, &FONT_XS, "DROP", lv_drop ? K_ACC : K_DIM);
+    cv_text(156, 128, &FONT_XS, "MIX", ui.view == V_MIX ? K_ACC : K_DIM);
+    cv_text(186, 128, &FONT_XS, "KEY", K_DIM);
+    cv_text(210, 128, &FONT_XS, EN_NOTE_NAME[(proj.par[P_ROOT] % 12 + 12) % 12], K_TEXT);
 }
 #endif
 
@@ -2980,9 +3316,12 @@ static void draw_main(void)
     }
     ui.grid_said = 0;
 #if EN_LIVE
-    if (ui.perf && ui.view == V_PERF) {          /* LIVE: the four layers */
+    if (ui.perf && (ui.view == V_PERF || ui.view == V_MIX)) {   /* LIVE: the four layers */
         char nm[12];
-        h = hash(hash(0x4C495645u, ui.mutes | lv_pmask << 8), (uint32_t)en_drum_pos[0] | (uint32_t)en_playing << 5 |
+        h = hash(hash(0x4C495645u, ui.mutes ^ lv_mutes_next() << 1), (uint32_t)lv_pmask ^ (uint32_t)(lv_pmask >> 32));
+        h = hash(hash(h, (uint32_t)proj.par[P_CHORD] | (uint32_t)proj.par[P_PINGS] << 8 | (uint32_t)proj.par[P_HATSLVL] << 16 |
+                         (uint32_t)proj.par[P_BASS] << 24), (uint32_t)lv_auto | lv_drop << 1 | proj.snap_ok << 2 | ui.view << 8);
+        h = hash(hash(h, 0), (uint32_t)en_drum_pos[0] | (uint32_t)en_playing << 5 |
                  (uint32_t)((plat_ms() / 200u) & 1u) << 6);
         h = hash(hash(h, (uint16_t)proj.par[P_LSTAB] | (uint32_t)(uint16_t)proj.par[P_DPAT1] << 16),
                  (uint16_t)proj.par[P_DPAT2] | (uint32_t)(uint16_t)proj.par[P_DPAT3] << 16);
@@ -3224,12 +3563,12 @@ static void draw_knobs(void)
     }
     for (i = 0; i < 4; i++) {
         const int off = fm_knob_off(ui.view, (int)i);   /* (the LFO, the fourth, on every voice; Ratio on two ops) */
-        const int moff = ui.view == V_MIX && (ui.mutes & LAYER_MUTE[i]) == LAYER_MUTE[i];   /* (the mix: a muted
+        const int moff = ui.view == V_MIX && (ui.mutes & MIX_MUTE(i)) == MIX_MUTE(i);   /* (the mix: a muted
                                                                                        * layer grey, its level kept) */
         int k = VIEW_KNOB[ui.view][i], lo, hi, v, hot = now_touch && ui.touched == (int)i && !off;
         int32_t x = (int32_t)i * 60, cx = x + 30;
         char t[16];
-        static const uint16_t MIXC[4] = {K_PAD, K_BELL, K_BASS, K_PULSE};   /* (the Mix page: the layers' colours) */
+        static const uint16_t MIXC[4] = {K_PAD, K_BELL, EN_LIVE ? K_PULSE : K_BASS, EN_LIVE ? K_BASS : K_PULSE};   /* (the Mix page: the layers' colours) */
         uint16_t bg = hot ? K_PANEL : K_BG, fill = off || moff ? K_LINE : ui.view == V_MIX ? MIXC[i] : hot ? K_ACC : K_PAD;
         if (k == K_NONE)
             continue;
@@ -3291,22 +3630,32 @@ static void leds(void)
             if (!(i & 3) || (ui.fx >> i & 1u))
                 k |= 1u << FX_KEY[i];
 #if EN_LIVE
-    } else if (ui.perf) {                        /* LIVE: the layers that sound (black), the rolls (white), BACK while
-                                                  * there's one, SAVE blinking while unsaved */
+    } else if (ui.perf) {                        /* LIVE: the layers that will sound (black), the rolls (white, dark a
+                                                  * moment on a roll), the snapshots stored, Auto, BACK while there's
+                                                  * one, SAVE blinking while unsaved, GLO lit on MIX */
+        const uint32_t mn = lv_mutes_next(), t = plat_ms();
         b |= 1u << B_SEL;
+        if (ui.view == V_MIX)
+            b |= 1u << B_GLO;
         for (i = 0; i < LV_N; i++) {
-            if (!(ui.mutes & LV_MUTE[i]))
+            if (!(mn & LV_MUTE[i]))
                 k |= 1u << LV_BLACK[i];
-            if (!lv_flash_t[i] || plat_ms() - lv_flash_t[i] > 200u)
+            if (!lv_flash_t[i] || t - lv_flash_t[i] > 200u)
                 k |= 1u << LV_WHITE[i];
+            if ((proj.snap_ok >> i & 1u) || (t / 600u) % 4u == i)
+                k |= 1u << LV_SNAPK[i];
         }
-        k |= 1u << LV_ALL;
+        if (!lv_drop)
+            k |= 1u << LV_DROP;
+        k |= 1u << LV_RECALL;
+        if (!lv_pending() || (t / 120u) & 1u)    /* (something waiting for the bar: ALL flickers) */
+            k |= 1u << LV_ALL;
         if (lv_has_prev)
             k |= 1u << LV_BACK;
-        if (!ui.dirty || (plat_ms() / 400u) & 1u)
+        if (lv_auto && ((t / 500u) & 1u || !en_playing))
+            k |= 1u << LV_AUTO;
+        if (!ui.dirty || (t / 400u) & 1u)
             k |= 1u << LV_SAVE;
-        if (lv_pmask && (plat_ms() / 120u) & 1u)   /* (a roll waiting for the bar: the keys flicker) */
-            k |= 1u << LV_ALL;
 #else
     } else if (ui.perf) {                        /* PERFORM: the layers heard, the solos, the moves (dark while held) */
 #endif

@@ -40,6 +40,8 @@ typedef struct {
     uint8_t screen;                      /* its screen view, 0..2: ripples, scope, spectrum (before 1.2.0: 0) */
 } slot_t;
 
+#define LIVE_SNAP_N 40
+
 typedef struct {
     uint32_t magic, format;
     int16_t par[P_NPARAMS];              /* the piece playing, as it is now (amb.h P_*) */
@@ -49,6 +51,11 @@ typedef struct {
     uint8_t screen;                      /* the Dub page's middle: 0 ripples, 1 scope, 2 spectrum (HOME again) */
     uint8_t rsv0;
     slot_t slot[NPIECES];                /* every piece as it was left (Tune and MIDI out are global) */
+    int16_t snap[4][LIVE_SNAP_N];        /* MEDEKAT LIVE: the four snapshots (ui.c LV_PARS), their mutes, piece, key */
+    uint32_t snap_mutes[4];
+    uint8_t snap_piece[4], snap_root[4];
+    uint8_t snap_ok;                     /* (a bit each: stored) */
+    uint8_t snap_rsv[3];
     uint8_t rsv[16];                     /* room to grow */
 } project_t;
 

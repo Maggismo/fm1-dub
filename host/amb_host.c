@@ -468,6 +468,10 @@ static int expect(const char *what, const char *val)
         got = ping_hash() == ping_mark;
     else if (!strcmp(what, "screen"))
         got = proj.screen;
+    else if (!strcmp(what, "snapok"))             /* (LIVE) the snapshots stored, a bit each */
+        got = proj.snap_ok;
+    else if (!strncmp(what, "par", 3) && what[3] >= '0' && what[3] <= '9')   /* parN: parameter N */
+        got = proj.par[atoi(what + 3)];
     else if (!strncmp(what, "litkey", 6))         /* litkeyN: key N (0..26) lit */
         got = (int)(lit_keys >> (atoi(what + 6) % 27) & 1u);
     else if (!strcmp(what, "mutes"))              /* the layers muted (EN_M_*: 1 chord .. 16 hats, 32 noise) */
