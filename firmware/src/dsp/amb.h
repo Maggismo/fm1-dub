@@ -41,6 +41,9 @@ extern const char *const EN_NOTE_NAME[12];
 extern const uint8_t EN_LOOP_LEN[EN_NLOOP];
 extern const uint8_t EN_DRUM_N[EN_NDRUM];
 
+#ifndef EN_LIVE
+#define EN_LIVE 1                                     /* MEDEKAT LIVE: the drone on the pings' layer, the live page */
+#endif
 /* parameters: value ranges in en_param_info() */
 enum {
     P_CHORD, P_PINGS, P_BASS, P_DRUMS,                /* layer levels */
@@ -100,6 +103,9 @@ enum {
     P_NWIDTH, P_NPLATE, P_NECHO, P_HLEN,
     P_NLFO,                                           /* (1.3.0, format 16) the noise's LFO: its rings' tone, over a bar */
     P_RUMBLE,                                         /* (1.3.0, format 17) the kick's rumble */
+    /* MEDEKAT LIVE: the stabs' sixteen steps as the live page rolled them (bit i: step i, as int16; 0: the piece's
+     * own Euclidean pattern), the bass line's seed, and how far a new variation strays (0..100) */
+    P_LSTAB, P_LBSEED, P_LDEV,
     P_NPARAMS
 };
 typedef struct {

@@ -63,6 +63,7 @@ static const en_param_t PARAMS[P_NPARAMS] = {
     {"Width", 0, 100, 50},    {"Noise decay", 0, 100, 50},
     {"Noise width", 0, 100, 50}, {"Noise plate", 0, 100, 50}, {"Noise echo", 0, 100, 50}, {"Hat len", -50, 50, 0},
     {"Noise LFO", 0, 100, 0}, {"Rumble", 0, 100, 0},
+    {"Live stabs", -32768, 32767, 0}, {"Live bass", 0, 9999, 0}, {"Variation", 0, 100, 50},
 };
 const en_param_t *en_param_info(int i) { return (i >= 0 && i < P_NPARAMS) ? &PARAMS[i] : &PARAMS[0]; }
 
@@ -80,14 +81,14 @@ static const struct {
     const char *name;
     int16_t v[P_NPARAMS];
 } PIECES[EN_NPIECES] = {
-    {"Juno Dub", {63, 8, 78, 90, 0, 35, 6, 10, 60, 1, 35, 80, 23, 80, 20, 30, 0, 1, 124, 0, 5, -1, 0, 0, 2, 45, 2, 40, 24, 6, 20, 60, 40, 0, 0, 1, 0, 25, -10, 0, 0, 0, 0, 0, 0, -25, 0, 25, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 5, 50, 0, -15, -10, 0, 0, 1, 40, 90, 80, 32, 70, 97, 55, 22, 72, 55, 60, 50, 50, 0, 30, 20}},
-    {"Juno Pad", {47, 0, 62, 74, 0, 35, 4, 10, 60, 2, 45, 82, 23, 95, 20, 30, 0, 1, 124, 0, 5, -1, 3, 0, 0, 30, 2, 40, 18, 6, 20, 75, 40, 0, 0, 1, 0, 20, -10, 0, 0, 0, 0, 0, 0, -30, 25, 30, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 5, 50, 0, -15, -10, 0, 0, 1, 40, 90, 80, 32, 70, 97, 55, 22, 80, 55, 60, 50, 50, 0, 30, 20}},
-    {"Juno Stab", {63, 8, 78, 90, 0, 35, 6, 10, 60, 1, 35, 70, 27, 55, 20, 30, 0, 1, 124, 0, 5, -1, 0, 0, 1, 40, 2, 40, 32, 6, 20, 60, 40, 0, 0, 1, 0, 18, -10, 0, 0, 0, 0, 0, 0, -20, -10, 10, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 5, 50, 0, -15, -10, 0, 0, 1, 40, 90, 80, 32, 55, 97, 55, 22, 70, 55, 60, 50, 50, 0, 30, 20}},
-    {"Dub", {68, 8, 78, 90, 0, 35, 6, 10, 60, 1, 35, 80, 29, 65, 20, 30, 0, 1, 124, 0, 5, -1, 3, 0, 3, 65, 2, 40, 25, 6, 20, 60, 40, 0, 0, 1, 0, 15, -5, 0, 0, 0, 0, 0, 0, -30, 15, 35, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 5, 50, 0, -15, -10, 0, 0, 1, 40, 90, 80, 32, 70, 97, 55, 22, 70, 55, 60, 50, 50, 0, 30, 20}},
-    {"Deep", {55, 0, 70, 82, 0, 35, 4, 10, 60, 1, 45, 75, 25, 85, 20, 30, 0, 1, 124, 0, 5, -1, 3, 0, 1, 35, 2, 40, 22, 6, 20, 70, 40, 0, 0, 3, 0, 15, -10, 0, 0, 0, 0, 0, 0, -30, 5, 15, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 5, 50, 0, -15, -10, 0, 0, 1, 40, 90, 80, 32, 65, 97, 55, 22, 80, 55, 60, 50, 50, 0, 30, 20}},
-    {"Detroit", {53, 0, 68, 80, 0, 35, 4, 10, 60, 3, 35, 72, 21, 65, 20, 40, 0, 1, 124, 0, 5, -1, 0, 0, 4, 45, 2, 40, 25, 6, 20, 60, 40, 0, 0, 2, 0, 20, -10, 0, 0, 0, 0, 0, 0, -20, -5, 10, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 5, 50, 0, -15, -10, 0, 0, 1, 40, 90, 80, 32, 55, 97, 55, 22, 80, 55, 60, 50, 50, 0, 30, 20}},
-    {"Hypno", {40, 0, 67, 82, 0, 20, 6, 10, 50, 0, 35, 60, 11, 65, 20, 10, 0, 1, 124, 0, 2, -1, 0, 0, 0, 25, 2, 40, 12, 6, 30, 60, 40, 0, 0, 1, 0, 20, -10, 0, 0, 0, 0, 0, 0, -25, 20, 0, 0, 0, -30, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 5, 50, 0, -15, -10, 0, 0, 1, 40, 90, 80, 20, 55, 100, 55, 22, 80, 55, 60, 50, 50, 0, 30, 55}},
-    {"Raw", {57, 2, 74, 90, 0, 40, 4, 30, 60, 0, 35, 58, 23, 45, 20, 40, 0, 1, 124, 0, 5, -1, 0, 0, 2, 40, 2, 40, 30, 6, 20, 60, 40, 0, 0, 2, 0, 15, 12, 0, 0, 0, 0, 0, 5, -15, -5, 0, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 5, 50, 0, -15, -10, 0, 0, 1, 40, 90, 80, 32, 45, 97, 55, 22, 80, 55, 60, 50, 50, 0, 30, 40}},
+    {"Juno Dub", {88, 52, 55, 100, 0, 0, 6, 10, 60, 1, 35, 80, 23, 80, 20, 0, 0, 1, 124, 0, 5, -1, 0, 0, 2, 45, 2, 40, 24, 6, 0, 60, 40, 0, 0, 1, 0, 25, -10, 0, 0, 0, 0, 0, 0, -25, 0, 25, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 4, 0, -4370, 17476, 4112, 0, 0, 17476, 0, 0, 0, 100, 85, 100, 70, 0, 50, 1, -15, -10, 0, 0, 1, 40, 90, 80, 95, 45, 97, 55, 22, 72, 55, 60, 50, 50, 0, 30, 20, 1156, 1, 50}},
+    {"Juno Pad", {88, 60, 55, 100, 0, 0, 6, 10, 60, 2, 45, 82, 23, 95, 20, 0, 0, 1, 124, 0, 5, -1, 3, 0, 0, 30, 2, 40, 18, 6, 0, 75, 40, 0, 0, 1, 0, 20, -10, 0, 0, 0, 0, 0, 0, -30, 25, 30, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, -4370, 17476, 4112, 0, 0, 17476, 0, 0, 0, 100, 85, 100, 70, 0, 50, 1, -15, -10, 0, 0, 1, 40, 90, 80, 95, 45, 97, 55, 22, 80, 55, 60, 50, 50, 0, 30, 20, 1156, 1, 50}},
+    {"Juno Stab", {88, 52, 55, 100, 0, 0, 6, 10, 60, 1, 35, 70, 27, 55, 20, 0, 0, 1, 124, 0, 5, -1, 0, 0, 1, 40, 2, 40, 32, 6, 0, 60, 40, 0, 0, 1, 0, 18, -10, 0, 0, 0, 0, 0, 0, -20, -10, 10, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 4, 0, -4370, 17476, 4112, 0, 0, 17476, 0, 0, 0, 100, 85, 100, 70, 0, 50, 1, -15, -10, 0, 0, 1, 40, 90, 80, 95, 45, 97, 55, 22, 70, 55, 60, 50, 50, 0, 30, 20, 1156, 1, 50}},
+    {"Dub", {88, 52, 55, 100, 0, 0, 6, 10, 60, 1, 35, 80, 29, 65, 20, 0, 0, 1, 124, 0, 5, -1, 3, 0, 3, 65, 2, 40, 25, 6, 0, 60, 40, 0, 0, 1, 0, 15, -5, 0, 0, 0, 0, 0, 0, -30, 15, 35, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, -4370, 17476, 4112, 0, 0, 17476, 0, 0, 0, 100, 85, 100, 70, 0, 50, 1, -15, -10, 0, 0, 1, 40, 90, 80, 95, 45, 97, 55, 22, 70, 55, 60, 50, 50, 0, 30, 20, 1156, 1, 50}},
+    {"Deep", {88, 52, 55, 100, 0, 0, 6, 10, 60, 1, 45, 75, 25, 85, 20, 0, 0, 1, 124, 0, 5, -1, 3, 0, 1, 35, 2, 40, 22, 6, 0, 70, 40, 0, 0, 3, 0, 15, -10, 0, 0, 0, 0, 0, 0, -30, 5, 15, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 4, 0, -4370, 17476, 4112, 0, 0, 17476, 0, 0, 0, 100, 85, 100, 70, 0, 50, 1, -15, -10, 0, 0, 1, 40, 90, 80, 95, 45, 97, 55, 22, 80, 55, 60, 50, 50, 0, 30, 20, 1156, 1, 50}},
+    {"Detroit", {88, 52, 55, 100, 0, 0, 6, 10, 60, 3, 35, 72, 21, 65, 20, 0, 0, 1, 124, 0, 5, -1, 0, 0, 4, 45, 2, 40, 25, 6, 0, 60, 40, 0, 0, 2, 0, 20, -10, 0, 0, 0, 0, 0, 0, -20, -5, 10, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, -4370, 17476, 4112, 0, 0, 17476, 0, 0, 0, 100, 85, 100, 70, 0, 50, 1, -15, -10, 0, 0, 1, 40, 90, 80, 95, 45, 97, 55, 22, 80, 55, 60, 50, 50, 0, 30, 20, 1156, 1, 50}},
+    {"Hypno", {88, 40, 55, 100, 0, 0, 6, 10, 50, 0, 35, 60, 11, 65, 20, 0, 0, 1, 124, 0, 5, -1, 0, 0, 0, 25, 2, 40, 12, 6, 0, 60, 40, 0, 0, 1, 0, 20, -10, 0, 0, 0, 0, 0, 0, -25, 20, 0, 0, 0, -30, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, -4370, 17476, 4112, 0, 0, 17476, 0, 0, 0, 100, 85, 100, 70, 0, 50, 1, -15, -10, 0, 0, 1, 40, 90, 80, 95, 45, 100, 55, 22, 80, 55, 60, 50, 50, 0, 30, 55, 1156, 1, 50}},
+    {"Raw", {88, 52, 55, 100, 0, 0, 6, 30, 60, 0, 35, 58, 23, 45, 20, 0, 0, 1, 124, 0, 5, -1, 0, 0, 2, 40, 2, 40, 30, 6, 0, 60, 40, 0, 0, 2, 0, 15, 12, 0, 0, 0, 0, 0, 5, -15, -5, 0, 0, 0, 0, -38, 0, 0, 0, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, -4370, 17476, 4112, 0, 0, 17476, 0, 0, 0, 100, 85, 100, 70, 0, 50, 1, -15, -10, 0, 0, 1, 40, 90, 80, 95, 45, 97, 55, 22, 80, 55, 60, 50, 50, 0, 30, 40, 1156, 1, 50}},
 };
 
 const char *en_piece_name(int i) { return PIECES[(unsigned)i < EN_NPIECES ? i : 0].name; }
@@ -1338,15 +1339,35 @@ static void bell_ring(int l, int slot)
 static int stab_k, stab_kb, stab_rot;
 static uint32_t stab_home;                      /* the pattern, before this bar's gaps */
 
+static int pcount16(uint32_t m) { int c = 0; for (; m; m &= m - 1u) c++; return c; }
 static void stabs_home(void)                    /* Stabs: one a bar .. six, off the beat */
 {
     stab_kb = stab_k = 1 + (pe(P_STABS) * 5 + 50) / 100;
     stab_rot = 2;
     stab_home = en_euclid(stab_k, 16, stab_rot);
+#if EN_LIVE
+    if (par[P_LSTAB]) {                          /* the live page's steps; Density (Energy) thins or fills them */
+        static const uint8_t MORE[8] = {2, 10, 6, 14, 3, 11, 7, 15};   /* (the offbeats first) */
+        uint32_t m = (uint16_t)par[P_LSTAB];
+        int want = pcount16(m) + stab_k - (1 + (par[P_STABS] * 5 + 50) / 100), i;
+        if (want < 1)
+            want = 1;
+        for (i = 15; i >= 0 && pcount16(m) > want; i--)
+            if (m >> i & 1u && pcount16(m) > 1)
+                m &= ~(1u << i);
+        for (i = 0; i < 8 && pcount16(m) < want; i++)
+            m |= 1u << MORE[i];
+        stab_home = m;
+    }
+#endif
 }
 
 static void stabs_evolve(void)                  /* the pattern turns a step, or gains or loses a stab */
 {
+#if EN_LIVE
+    if (par[P_LSTAB])
+        return;                                  /* (the live page's steps stay as rolled) */
+#endif
     if (frand() < 0.6f) {
         stab_rot = (stab_rot + (frand() < 0.5f ? 1 : 15)) % 16;
     } else {
@@ -1569,7 +1590,12 @@ static void bass_hit(int first, int up)
          * octave and minor third, all sitting with the kick */
         static const int8_t LINE[8] = {7, 10, 3, 7, 10, 3, 7, 10};   /* (no octave: it stays in the sub) */
         const uint32_t salt = (uint32_t)par[P_BVOICE] * 7919u + (uint32_t)par[P_GROOVE] * 131u + (uint32_t)par[P_FIFTH] * 31u;
-        uint32_t h = (bar / 16u + salt) * 2654435761u ^ (uint32_t)(bass_st + 1) * 40503u ^ ((bar & 3u) == 3u ? 0x9E37u : 0u);
+#if EN_LIVE
+        const uint32_t motif = (uint32_t)par[P_LBSEED] * 2246822519u + salt;   /* (the live page's: kept till rolled) */
+#else
+        const uint32_t motif = bar / 16u + salt;
+#endif
+        uint32_t h = motif * 2654435761u ^ (uint32_t)(bass_st + 1) * 40503u ^ ((bar & 3u) == 3u ? 0x9E37u : 0u);
         h ^= h >> 15, h *= 2246822519u, h ^= h >> 13;
         if ((int)(h % 100u) < par[P_FIFTH]) {
             const int iv = LINE[(h >> 8) % 8u];
@@ -2453,7 +2479,7 @@ static void apply(int p, int v)
     case P_DRUMS: pulse_vol = (float)(v * v) * 0.0001f; lanes(); break;
     case P_HITS: hats_home(); break;
     case P_DMODE: case P_DPAT0: case P_DPAT1: case P_DPAT2: case P_DPAT3: case P_DPAT4: lanes(); break;
-    case P_STABS: stabs_home(); break;
+    case P_STABS: case P_LSTAB: stabs_home(); break;
     case P_SWING: swing = (float)v * 0.004f; break;      /* the off sixteenths up to 0.4 of a step late */
     case P_HATS: case P_HTONE: {                 /* the piece's colour, moved by the sound page's Hats */
         float h = fm_clampf((float)(pe(P_HATS) + par[P_HTONE]), 0.0f, 100.0f);
@@ -2485,6 +2511,13 @@ static void apply(int p, int v)
     case P_CR0: case P_CR1: case P_CR2: case P_CR3: case P_CR4: case P_CR5: case P_CR6: case P_CR7:
     case P_CQ0: case P_CQ1: case P_CQ2: case P_CQ3: case P_CQ4: case P_CQ5: case P_CQ6: case P_CQ7:
     case P_CX0: case P_CX1: case P_CX2: case P_CX3: case P_CX4: case P_CX5: case P_CX6: case P_CX7:
+#if EN_LIVE
+        if (nsteps && prog_pos < 0 && PLAY_LOOP && prog_len()) {   /* (LIVE: a loop not yet started, its first slot
+                                                                     * written: it sounds now) */
+            prog_pos = 0;
+            en_prog_pos = 0;
+        }
+#endif
         if (nsteps && prog_pos >= 0 && (p - P_CR0) % 8 == prog_pos)
             slot_play(prog_pos);                 /* the slot playing, edited: heard at once */
         prog_publish();
@@ -3797,6 +3830,82 @@ static inline float mfx(float x, float *s)
 }
 
 static float ms_lp1, ms_lp2;                     /* the side's lows (mono below ~150 Hz) */
+
+#if EN_LIVE
+/* MEDEKAT LIVE: the drone, on the pings' layer (their level, their mute; the pings themselves rest, Density 0): the
+ * chord's root, fifth and seventh as two saws each, a few cents apart (one left, one right), an octave under the
+ * stabs' top, through a slow low-pass breathing over eight bars; to a new chord the notes glide over about two
+ * seconds; it swells in over three seconds when the music starts, and away when it stops. Into the plate and a
+ * little of the echo: a bed under the stabs */
+#define DR_N 3
+static float dr_ph[DR_N][2], dr_f[DR_N], dr_env, dr_lfo, dr_s[2][2], dr_c[4];
+static inline float dr_blep(float t, float dt)  /* PolyBLEP: the saw's step, rounded */
+{
+    if (t < dt) {
+        t /= dt;
+        return t + t - t * t - 1.0f;
+    }
+    if (t > 1.0f - dt) {
+        t = (t - 1.0f) / dt;
+        return t * t + t + t + 1.0f;
+    }
+    return 0.0f;
+}
+static void render_drone(uint32_t n)
+{
+    static const float DET[2] = {0.9965f, 1.0035f};   /* (+-6 cents) */
+    float tgt[DR_N], g, ft, l, r, x, bp;
+    const float on = (!(mutes & EN_M_PINGS) && en_playing && bell_vol > 0.0f) ? 1.0f : 0.0f;
+    int i, k;
+    uint32_t j;
+    {
+        const int pcs[DR_N] = {chord_pcs[0], chord_pcs[2], chord_nt > 3 ? chord_pcs[3] : chord_pcs[1]};
+        for (i = 0; i < DR_N; i++) {
+            int m = 48 + ((pcs[i] - 48) % 12 + 12) % 12;   /* (C3..B3) */
+            if (i > 0 && m < 48 + ((pcs[0] - 48) % 12 + 12) % 12)
+                m += 12;                         /* (above the root) */
+            tgt[i] = mtof((float)m) * (1.0f / EN_SR);
+            if (dr_f[i] <= 0.0f)
+                dr_f[i] = tgt[i];
+        }
+    }
+    if (on <= 0.0f && dr_env < 0.0005f) {
+        dr_env = 0.0f;
+        return;
+    }
+    dr_lfo += (float)n / (step_len * 128.0f);   /* (eight bars a turn: 128 sixteenths) */
+    if (dr_lfo >= 1.0f)
+        dr_lfo -= 1.0f;
+    ft = 260.0f * fm_exp2f(2.4f * (float)pe(P_CUTOFF) * 0.01f + 0.6f * fm_sinf(FM_TWO_PI * dr_lfo));
+    svf_coefs(dr_c, ft, 1.1f);
+    g = bell_vol * 0.22f;
+    for (j = 0; j < n; j++) {
+        dr_env += (on - dr_env) * (on > dr_env ? 0.000007f : 0.00002f);
+        l = r = 0.0f;
+        for (i = 0; i < DR_N; i++) {
+            dr_f[i] += (tgt[i] - dr_f[i]) * 0.00003f;
+            for (k = 0; k < 2; k++) {
+                const float dt = dr_f[i] * DET[k];
+                float ph = dr_ph[i][k] + dt;
+                if (ph >= 1.0f)
+                    ph -= 1.0f;
+                dr_ph[i][k] = ph;
+                x = 2.0f * ph - 1.0f - dr_blep(ph, dt);
+                if (k)
+                    r += x;
+                else
+                    l += x;
+            }
+        }
+        l = svf_lp(dr_c, dr_s[0], l, &bp) * g * dr_env;
+        r = svf_lp(dr_c, dr_s[1], r, &bp) * g * dr_env;
+        mixl[j] += l;
+        mixr[j] += r;
+        rsend[j] += (l + r) * 0.35f;
+        esend[j] += (l + r) * 0.12f;
+    }
+}
+#endif
 static void render_chunk(int32_t *out, uint32_t n, float gain)
 {
     uint32_t j;
@@ -3829,6 +3938,9 @@ static void render_chunk(int32_t *out, uint32_t n, float gain)
             for (j = 0; j < n; j++)
                 tapb[j] = -(mixl[j] + mixr[j]);
         render_bells(n);
+#if EN_LIVE
+        render_drone(n);
+#endif
         widen(n);                                /* (the chord's and the pings' dry, wider) */
         if (tl == 2)
             for (j = 0; j < n; j++)

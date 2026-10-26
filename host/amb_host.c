@@ -779,6 +779,12 @@ int main(int argc, char **argv)
                 o.slot[i].screen = proj.slot[i].screen;
             }
             plat_store_save(OBJ_PROJ, &o, sizeof o);
+        } else if (!strcmp(cmd, "par")) {        /* (test) par P V: a parameter, as a knob would set it */
+            int pp = atoi(a), vv = atoi(b);
+            if (a[0] && b[0] && pp >= 0 && pp < P_NPARAMS) {
+                proj.par[pp] = (int16_t)vv;
+                en_set(pp, vv);
+            }
         } else if (!strcmp(cmd, "storefile")) {  /* a saved project from a file, as it would be in the flash */
             static uint8_t fb[PLAT_STORE_MAX];
             FILE *f = fopen(a, "rb");

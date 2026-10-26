@@ -18,6 +18,12 @@
  *   GLO held       saves (it also saves by itself a few seconds after a change, while resting);
  *                  held on 1.5 s: the piece back to its recipe */
 #include "../dsp/fastmath.h"
+#include "../dsp/amb.h"
+#if EN_LIVE
+#define LIVE_ON (ui.perf != 0)                   /* MEDEKAT LIVE: the live page is up */
+#else
+#define LIVE_ON 0
+#endif
 
 /* the pages, one a layer (a button each, NPAGES; the Noise page, V_NSND, SAVE's); SELECT steps through them in the
  * panel's order, PAGE_ORDER below (the view numbers stay as they were: the tests use them) */
@@ -29,7 +35,7 @@ enum { V_DUB, V_CHORD, V_TEXTURE, V_BASS, V_DRUMS, V_SPACE, V_SETUP, NPAGES, V_M
  * tempo, the Dub page's second) */
 static const char *const VIEW_NAME[NVIEWS] = {"Dub", "Chord", "Pings", "Bass", "Drums", "Space", "Setup", "Mix",
                                               "Chord sound", "Ping sound", "Bass sound", "Drum sound",
-                                              "Chord FM", "Ping FM", "Bass FM", "Chords", "Pattern", "Perform", "Key", "Noise",
+                                              "Chord FM", "Ping FM", "Bass FM", "Chords", "Pattern", EN_LIVE ? "Live" : "Perform", "Key", "Noise",
                                               "Echo", "Noise space"};
 #define B_NONE 0xFFu
 static const uint8_t VIEW_BTN[NVIEWS] = {B_HOME, B_ENV, B_ARP, B_LFO, B_SEQ, B_FX, B_GLO, B_NONE, B_NONE, B_NONE, B_NONE,
@@ -102,7 +108,11 @@ static const uint16_t VIEW_KNOB[NVIEWS][4] = {
     {P_BALG, P_BFRAT, P_BFB, P_BFDEC},
     {K_SLOT, K_CQ, K_CX, K_PLAY},
     {K_LANE, P_DACCENT, K_LCH, P_DMODE},
+#if EN_LIVE
+    {K_FILTER, K_DUB, K_ENERGY, P_LDEV},         /* (MEDEKAT LIVE: Filter, Echo, Density, Variation) */
+#else
     {K_FILTER, K_DUB, K_ENERGY, P_DUCK},         /* (Wet, Energy: offsets for playing; Duck the piece's own) */
+#endif
     {P_TEMPO, P_ROOT, K_MODE, P_SWING},
     {P_NGRAIN, P_NROOM, P_NCOL, P_NTUNE},     /* (the level on OCT- / OCT+, as the layers'; Drift the recipes') */
     {P_EBLUR, P_ETONE, P_EWIDTH, P_SIZE},
@@ -126,7 +136,11 @@ static const char *const KNOB_LABEL[NVIEWS][4] = {
     {"Algo", "Ratio", "Feedback", "LFO"},
     {"Slot", "Chord", "Type", "Play"},
     {"Lane", "Accent", "Chance", "Play"},
+#if EN_LIVE
+    {"Filter", "Echo", "Density", "Variation"},
+#else
     {"Filter", "Wet", "Energy", "Duck"},
+#endif
     {"Tempo", "Root", "Mode", "Swing"},
     {"Density", "Air", "Tone", "Decay"},
     {"Blur", "Tone", "Width", "Size"},
@@ -167,8 +181,13 @@ static const char *const KNOB_HELP[NVIEWS][4] = {
      "Endless, or the slots in a loop"},
     {"The lane you're writing", "How much quieter the other steps", "How likely the lane's steps play",
      "Auto patterns, or your own"},
+#if EN_LIVE
+    {"Shut: under water. Open: thin", "The whole music dry, or drowned", "Fewer stabs and notes, or more",
+     "How far a new variation strays"},
+#else
     {"Shut: under water. Open: thin", "The whole music dry, or drowned", "Sparse and dry, to busy and bright",
      "How far each beat pushes the rest down"},
+#endif
     {"Beats a minute", "The key's root note", "The scale: Minor, Dorian, ...", "Off sixteenths late: the whole groove"},
     {"How many hits ring, in two bars", "The hiss under it, softer or more", "The rings darker, or brighter",
      "How long each hit rings on the chord"},
@@ -760,6 +779,244 @@ static void perf_key(uint32_t key, int down)
         say(PERF_NAME[i], 0);
 }
 
+#if EN_LIVE
+/* --------------------------------------------------------------- LIVE --- */
+/* MEDEKAT LIVE (SEL's mode, and where the FM-1 starts): four layers, each a sequence of sixteen steps rolled by a
+ * key, inside guard rails (the key's notes, a register, a density), and set going on the next bar:
+ *   black 1-4   the layers on and off: Stabs, Drone (with its noise bed), Hats, Sub; one held, the knobs its level
+ *   white 1-4   a new variation of that layer (the drone's: a new chord, under the stabs too)
+ *   white 5 all four new · white 6 back to the variation before (again: forward, an A/B) · white 7 save
+ *   knobs       Filter, Echo, Density, Variation (how far a roll strays) · OCT- / OCT+ the key a semitone down / up
+ * The kick is never heard (the Digitakt plays it): its mute is always on */
+#define LV_N 4
+static const uint8_t LV_BLACK[LV_N] = {1, 3, 5, 8}, LV_WHITE[LV_N] = {0, 2, 4, 6};
+#define LV_ALL 7u
+#define LV_BACK 9u
+#define LV_SAVE 11u
+static const char *const LV_NAME[LV_N] = {"STABS", "DRONE", "HATS", "SUB"};
+static const uint32_t LV_MUTE[LV_N] = {EN_M_CHORD, EN_M_PINGS | EN_M_NOISE, EN_M_HATS, EN_M_BASS};
+static const uint8_t LV_LEVEL[LV_N] = {P_CHORD, P_PINGS, P_HATSLVL, P_BASS};
+static const uint8_t LV_PARS[] = {P_LSTAB, P_CR0, P_CQ0, P_CX0,
+                                  P_DPAT1, P_DPAT2, P_DPAT3, P_DACC1, P_DACC2, P_DACC3, P_DCH1, P_DCH2, P_DCH3,
+                                  P_GROOVE, P_FIFTH, P_BNOTES, P_LBSEED};
+#define LV_NP ((int)sizeof LV_PARS)
+static int16_t lv_prev[LV_NP], lv_pend[LV_NP];
+static uint32_t lv_pmask;                        /* the parameters waiting for the next bar */
+static uint8_t lv_has_prev, lv_held;             /* (lv_held: the black keys down, a knob then their level) */
+static uint32_t lv_rng = 0x9E3779B9u, lv_bar, lv_flash_t[LV_N];
+static uint32_t lv_r(uint32_t n)                 /* 0 .. n-1 */
+{
+    lv_rng ^= lv_rng << 13, lv_rng ^= lv_rng >> 17, lv_rng ^= lv_rng << 5;
+    return n ? lv_rng % n : 0u;
+}
+static int lv_idx(int p)
+{
+    int i;
+    for (i = 0; i < LV_NP; i++)
+        if (LV_PARS[i] == p)
+            return i;
+    return -1;
+}
+static int16_t lv_now(int p)                     /* as it will be: waiting, or playing */
+{
+    int i = lv_idx(p);
+    return i >= 0 && (lv_pmask >> i & 1u) ? lv_pend[i] : proj.par[p];
+}
+static void lv_put(int p, int v)                 /* for the next bar (the first of a roll: the one before kept) */
+{
+    int i = lv_idx(p);
+    if (i < 0)
+        return;
+    if (!lv_pmask) {
+        int k;
+        for (k = 0; k < LV_NP; k++)
+            lv_prev[k] = proj.par[LV_PARS[k]];
+        lv_has_prev = 1;
+    }
+    lv_pend[i] = (int16_t)v;
+    lv_pmask |= 1u << i;
+}
+static void lv_apply(void)                       /* the bar's first sixteenth (or at once, at rest) */
+{
+    int i;
+    for (i = 0; i < LV_NP; i++)
+        if (lv_pmask >> i & 1u)
+            knob_set(LV_PARS[i], lv_pend[i]);
+    lv_pmask = 0;
+}
+static int16_t lv_i16(uint32_t m) { return (int16_t)(uint16_t)m; }
+static int lv_bits(uint32_t m) { int c = 0; for (; m; m &= m - 1u) c++; return c; }
+
+/* the stabs: one to five a bar, the offbeat eighths likeliest, the sixteenths between them as Variation rises, the
+ * beat itself seldom; never two side by side */
+static void lv_roll_stabs(int dev)
+{
+    int k = 1 + (proj.par[P_STABS] * 5 + 50) / 100, n = 0, tries = 0;
+    uint32_t m = 0;
+    if (dev > 40)
+        k += (int)lv_r(3) - 1;
+    k = k < 1 ? 1 : k > 5 ? 5 : k;
+    while (n < k && tries++ < 200) {
+        int st = (int)lv_r(16), w;
+        w = (st & 3) == 2 ? 60 : (st & 1) ? 15 + dev / 3 : st == 0 ? 2 : 4 + dev / 6;
+        if ((int)lv_r(60) >= w || (m >> st & 1u) || (m >> ((st + 1) & 15) & 1u) || (m >> ((st + 15) & 15) & 1u))
+            continue;
+        m |= 1u << st;
+        n++;
+    }
+    if (!m)
+        m = 1u << 2;
+    lv_put(P_LSTAB, lv_i16(m));
+}
+
+/* the drone (and the stabs over it): a chord of the key's own, near home while Variation is low */
+static void lv_roll_chord(int dev)
+{
+    static const int8_t CH[8][3] = {{0, 2, 2}, {0, 2, 4}, {0, 2, 5}, {8, 1, 3}, {3, 1, 3}, {5, 2, 2}, {10, 4, 2},
+                                    {7, 2, 2}};   /* (Cm7 Cm9 Cm11 AbM7 EbM7 Fm7 Bb7sus4 Gm7, in C) */
+    const int r = proj.par[P_ROOT], span = dev < 35 ? 3 : dev < 70 ? 6 : 8;
+    int i, tries = 0;
+    do
+        i = (int)lv_r((uint32_t)span);
+    while (tries++ < 8 && (r + CH[i][0]) % 12 == lv_now(P_CR0) && CH[i][1] == lv_now(P_CQ0) && CH[i][2] == lv_now(P_CX0));
+    lv_put(P_CR0, (r + CH[i][0]) % 12);
+    lv_put(P_CQ0, CH[i][1]);
+    lv_put(P_CX0, CH[i][2]);
+}
+
+/* the hats: a shaker on the sixteenths off the beat (a few out), the open hat on the offbeats, a rim or two */
+static void lv_roll_hats(int dev)
+{
+    static const uint16_t SHK[4] = {0xEEEE, 0xAAAA, 0xEEEE, 0x6E6E}, OPN[5] = {0x4444, 0x4444, 0x4040, 0x0404, 0x4454};
+    static const uint8_t RIM[7] = {4, 12, 7, 14, 10, 13, 3};
+    uint32_t sh = SHK[lv_r(dev < 50 ? 2 : 4)], op = OPN[lv_r(dev < 40 ? 2 : 5)], rim = 0;
+    int drop = (int)lv_r((uint32_t)(1 + dev / 25)), i;
+    for (i = 0; i < drop; i++)
+        sh &= ~(1u << lv_r(16));
+    if (lv_r(100) < 50u)
+        rim = 1u << 4 | 1u << 12;
+    else
+        for (i = 1 + (int)lv_r(2); i > 0; i--)
+            rim |= 1u << RIM[lv_r(dev < 50 ? 4 : 7)];
+    lv_put(P_DPAT1, lv_i16(sh));
+    lv_put(P_DPAT2, lv_i16(op));
+    lv_put(P_DPAT3, lv_i16(rim));
+    lv_put(P_DACC1, lv_i16(lv_r(2) ? 0x4444u : 0x2222u));
+    lv_put(P_DCH2, 75 + (int)lv_r(26));
+    lv_put(P_DCH3, 55 + (int)lv_r(41));
+}
+
+/* the sub: a groove (Drone, Offbeat, Dotted, Sync; Roller only when Variation is high), how often it moves off the
+ * root, how many of its notes, and a new seed for its line */
+static void lv_roll_sub(int dev)
+{
+    lv_put(P_GROOVE, (int)lv_r(dev > 70 ? 5 : 4));
+    lv_put(P_FIFTH, 15 + (int)lv_r((uint32_t)(10 + dev / 2)));
+    lv_put(P_BNOTES, 75 + (int)lv_r(26));
+    lv_put(P_LBSEED, 1 + (int)lv_r(9999));
+}
+
+static void lv_roll(int layer)
+{
+    const int dev = proj.par[P_LDEV];
+    lv_rng ^= plat_ms() * 2654435761u;
+    if (layer == 0)
+        lv_roll_stabs(dev);
+    else if (layer == 1)
+        lv_roll_chord(dev);
+    else if (layer == 2)
+        lv_roll_hats(dev);
+    else
+        lv_roll_sub(dev);
+    lv_flash_t[layer] = plat_ms();
+    if (!en_playing)
+        lv_apply();
+    say(LV_NAME[layer], "NEW");
+}
+
+static void lv_back(void)                        /* the variation before; again: the one after (an A/B) */
+{
+    int16_t now[LV_NP];
+    int i;
+    if (!lv_has_prev)
+        return;
+    for (i = 0; i < LV_NP; i++)
+        now[i] = lv_now(LV_PARS[i]);
+    for (i = 0; i < LV_NP; i++) {
+        lv_pend[i] = lv_prev[i];
+        lv_prev[i] = now[i];
+    }
+    lv_pmask = (1u << LV_NP) - 1u;
+    if (!en_playing)
+        lv_apply();
+    say("BACK", 0);
+}
+
+static void lv_mutes(void)
+{
+    ui.mutes |= EN_M_KICK;                       /* (the Digitakt plays the kick) */
+    perf_mutes();
+}
+
+static void live_key(uint32_t key, int down)
+{
+    int i;
+    for (i = 0; i < LV_N; i++)
+        if (key == LV_BLACK[i]) {
+            if (down) {
+                lv_held |= (uint8_t)(1u << i);
+                ui.mutes ^= LV_MUTE[i];
+                lv_mutes();
+                say(LV_NAME[i], ui.mutes & LV_MUTE[i] ? "OFF" : "ON");
+            } else {
+                lv_held &= (uint8_t)~(1u << i);
+            }
+            return;
+        }
+    if (!down)
+        return;
+    for (i = 0; i < LV_N; i++)
+        if (key == LV_WHITE[i]) {
+            lv_roll(i);
+            return;
+        }
+    if (key == LV_ALL) {
+        for (i = 0; i < LV_N; i++)
+            lv_roll(i);
+        say("ALL", "NEW");
+        card_show("ALL NEW", "on the next bar", K_ACC, 0);
+    } else if (key == LV_BACK) {
+        lv_back();
+    } else if (key == LV_SAVE) {
+        lv_apply();
+        do_save();
+        card_show("SAVED", piece_name(proj.piece), K_ACC, 0);
+    }
+}
+
+static void lv_key_shift(int d)                  /* OCT- / OCT+: the key a semitone down or up, the chord with it */
+{
+    const int r = (proj.par[P_ROOT] + d + 12) % 12;
+    knob_set(P_ROOT, r);
+    if (proj.par[P_CQ0])
+        knob_set(P_CR0, (proj.par[P_CR0] + d + 12) % 12);
+    if (lv_pmask >> 1 & 1u)
+        lv_pend[1] = (int16_t)((lv_pend[1] + d + 12) % 12);
+    say("KEY", EN_NOTE_NAME[r]);
+}
+
+static void lv_tick(void)                        /* each frame: the waiting variations on the bar's first sixteenth */
+{
+    const uint32_t b = en_bars / 16u;
+    if (!lv_pmask)
+        lv_bar = b;
+    else if (!en_playing || b != lv_bar) {
+        lv_bar = b;
+        lv_apply();
+    }
+}
+#endif
+
 static void set_view(int v);
 static void perf_set(int on)                     /* on: the mixer on the knobs; off: back to the page */
 {
@@ -776,7 +1033,7 @@ static void perf_set(int on)                     /* on: the mixer on the knobs; 
         if (ui.view == V_MIX || ui.view == V_PERF)
             set_view(ui.perf_from);
     }
-    say("PERFORM", on ? "ON" : "OFF");
+    say(EN_LIVE ? "LIVE" : "PERFORM", on ? "ON" : "OFF");
 }
 
 /* ------------------------------------------------------- the effects grid --- */
@@ -934,6 +1191,19 @@ static void set_view(int v)
 static void button(int b)
 {
     int v;
+#if EN_LIVE
+    if (b == B_SEL) {                            /* LIVE: SEL to DUB-1's own pages, and back */
+        if (ui.perf) {
+            perf_set(0);
+            set_view(V_DUB);
+        } else {
+            perf_set(1);
+        }
+        return;
+    }
+    if (ui.perf && b != B_PLAY && b != B_REC)
+        return;                                  /* (LIVE: the page buttons rest, so nothing leaves by accident) */
+#endif
     if (ui.perf && (b == B_HOME || b == B_ENV || b == B_ARP || b == B_LFO || b == B_SEQ || b == B_FX || b == B_GLO ||
                     b == B_SAVE || b == B_EDIT)) {   /* (1.3.0) a page's button leaves PERFORM: the keys the scale
                                                       * again, the page its first (SEL brings PERFORM back) */
@@ -1320,10 +1590,21 @@ static void input(void)
                 ui.reset_done = 0;
             if (i == B_PLAY)                   /* transport on the press */
                 button((int)i);
-            if (i == B_OCTDN || i == B_OCTUP)
-                oct_press((int)i);
+            if (i == B_OCTDN || i == B_OCTUP) {
+#if EN_LIVE
+                if (ui.perf)
+                    lv_key_shift(i == B_OCTUP ? 1 : -1);
+                else
+#endif
+                    oct_press((int)i);
+            }
         } else if (i == B_OCTDN || i == B_OCTUP) {
-            oct_release((int)i);
+#if EN_LIVE
+            if (!ui.perf)
+#endif
+                oct_release((int)i);
+        } else if (LIVE_ON && i == B_EDIT) {
+            ;                                    /* (LIVE: EDIT rests) */
         } else if (i == B_EDIT) {               /* EDIT: the Chords page (a tap), the next chord (held) */
             edit_released(plat_ms() - ui.down_t[B_EDIT]);
         } else if (i == B_GLO && !(ui.btn_used & m) && plat_ms() - ui.down_t[B_GLO] >= NUDGE_HOLD) {
@@ -1336,8 +1617,12 @@ static void input(void)
             button((int)i);
         }
     }
-    oct_hold();
-    for (i = 0; i < NNUDGE; i++) {               /* a layer's button held: a nudge; held on: a shake (its release
+#if EN_LIVE
+    lv_tick();
+    if (!ui.perf)
+#endif
+        oct_hold();
+    for (i = 0; i < NNUDGE && !LIVE_ON; i++) {   /* (LIVE: no nudges or shakes) */               /* a layer's button held: a nudge; held on: a shake (its release
                                                   * then does nothing) */
         static uint8_t shaken;
         uint32_t m = 1u << NUDGE_BTN[i], held = plat_ms() - ui.down_t[NUDGE_BTN[i]];
@@ -1358,7 +1643,7 @@ static void input(void)
         const uint32_t m = 1u << B_HOME;
         if (!(btn & m)) {
             home_shaken = 0;
-        } else if (!home_shaken && !(ui.btn_used & m) && plat_ms() - ui.down_t[B_HOME] >= SHAKE_HOLD &&
+        } else if (!home_shaken && !LIVE_ON && !(ui.btn_used & m) && plat_ms() - ui.down_t[B_HOME] >= SHAKE_HOLD &&
                    (int32_t)(ui.turn_t - ui.down_t[B_HOME]) <= 0) {
             static const uint8_t ALL[5] = {0, 1, 2, 3, 5};
             int j;
@@ -1372,7 +1657,7 @@ static void input(void)
             card_show("SHAKE ALL", "chord pings bass drums noise", K_FROST, 1);
         }
     }
-    if ((btn >> B_EDIT & 1u) && !edit_new && plat_ms() - ui.down_t[B_EDIT] >= SHAKE_HOLD &&
+    if (!LIVE_ON && (btn >> B_EDIT & 1u) && !edit_new && plat_ms() - ui.down_t[B_EDIT] >= SHAKE_HOLD &&
         (int32_t)(ui.turn_t - ui.down_t[B_EDIT]) <= 0) {   /* EDIT held on: a new progression, the walk's chords
                                                   * all walked again (yours, the gaps and the one playing kept) */
         edit_new = 1;
@@ -1400,8 +1685,13 @@ static void input(void)
                     slot_key(i);
                 continue;
             }
+#if EN_LIVE
+            if (ui.perf)
+                live_key(i, (int)(keys >> i & 1u));
+#else
             if (ui.perf)
                 perf_key(i, (int)(keys >> i & 1u));
+#endif
             else if (keys >> i & 1u)
                 toggle_note((int)((5u + i) % 12u));   /* key 0 is F3 */
         }
@@ -1470,7 +1760,7 @@ static void input(void)
         set_piece(proj.piece + (int)e);
         ui.turn_t = plat_ms();
     }
-    if ((btn >> B_GLO & 1u) && !ui.reset_done && plat_ms() - ui.down_t[B_GLO] > RESET_HOLD) {
+    if (!LIVE_ON && (btn >> B_GLO & 1u) && !ui.reset_done && plat_ms() - ui.down_t[B_GLO] > RESET_HOLD) {
         ui.reset_done = 1;                     /* held on: the piece back to its recipe (not saved) */
         ui.btn_used |= 1u << B_GLO;
         project_piece_reset();
@@ -1487,6 +1777,17 @@ static void input(void)
             if (fm_knob_off(ui.view, (int)i))
                 continue;                        /* (an FM page on a voice that isn't FM: the knobs rest, greyed; the
                                                   * LFO, the fourth, works on every voice) */
+#if EN_LIVE
+            if (ui.perf && lv_held) {            /* LIVE: a layer's black key held, any knob its level */
+                int l;
+                for (l = 0; l < LV_N && !(lv_held >> l & 1u); l++)
+                    ;
+                turn(EN_K1 + (int)i, LV_LEVEL[l], e);
+                say(LV_NAME[l], "LEVEL");
+                ui.act_t = ui.turn_t = plat_ms();
+                continue;
+            }
+#endif
             turn(EN_K1 + (int)i, VIEW_KNOB[ui.view][i], e);
             ui.touched = (int8_t)i;
             ui.touch_until = plat_ms() + 1200u;
@@ -2591,6 +2892,67 @@ static void draw_card(uint32_t now)
     text_c(CX, y + 28, &FONT_XS, ui.card_text, tc);
 }
 
+#if EN_LIVE
+/* LIVE: a row a layer, its sixteen steps (the stabs, the hats' three lanes, the sub's groove; the drone its chord),
+ * dark while it's off; NEXT while a roll waits for the bar; the step playing lit; a line of the keys below */
+static void draw_live(void)
+{
+    static const uint16_t COL[LV_N] = {K_PAD, K_BELL, K_PULSE, K_BASS};
+    const int pos = en_drum_pos[0];
+    int l, i;
+    for (l = 0; l < LV_N; l++) {
+        const int32_t y = 2 + l * 31, on = !(ui.mutes & LV_MUTE[l]);
+        const uint16_t c = on ? COL[l] : K_DIM;
+        const int flash = lv_flash_t[l] && plat_ms() - lv_flash_t[l] < 350u;
+        uint32_t wait = 0;
+        cv_round(2, y, 236, 28, 5, flash ? mix(K_BG, COL[l], 6) : on ? mix(K_BG, K_PANEL, 12) : K_BG);
+        cv_text(8, y + 6, &FONT_B, LV_NAME[l], c);
+        if (l == 0)
+            wait = lv_pmask & 1u;
+        else if (l == 1)
+            wait = lv_pmask & 0xEu;
+        else if (l == 2)
+            wait = lv_pmask & 0x1FF0u;
+        else
+            wait = lv_pmask & 0x1E000u;
+        if (wait)
+            cv_text(8, y + 19, &FONT_XS, (plat_ms() / 200u) & 1u ? "NEXT" : "", K_TEXT);
+        if (l == 1) {                            /* the drone: its chord */
+            char nm[12];
+            cv_text(96, y + 6, &FONT_B, chord_now(nm), c);
+            continue;
+        }
+        for (i = 0; i < 16; i++) {
+            const int32_t x = 78 + i * 10;
+            int hit = 0, tall = 0;
+            uint16_t cc = c;
+            if (l == 0) {
+                hit = (int)((uint16_t)proj.par[P_LSTAB] >> i & 1u);
+                tall = 1;
+            } else if (l == 2) {
+                const int sh = (int)((uint16_t)proj.par[P_DPAT1] >> i & 1u), op = (int)((uint16_t)proj.par[P_DPAT2] >> i & 1u),
+                          rm = (int)((uint16_t)proj.par[P_DPAT3] >> i & 1u);
+                hit = sh || op || rm;
+                tall = op || rm;
+                if (rm)
+                    cc = on ? K_RIM : K_DIM;
+            } else {
+                hit = (int)(en_groove(en_groove_pat(proj.par[P_GROOVE])) >> i & 1u);
+                tall = 1;
+            }
+            if (en_playing && i == pos)
+                cv_rect(x, y + 3, 9, 22, mix(K_BG, K_TEXT, 4));
+            if (hit)
+                cv_round(x + 1, tall ? y + 7 : y + 12, 7, tall ? 14 : 6, 2, en_playing && i == pos ? K_TEXT : cc);
+            else
+                cv_rect(x + 4, y + 13, 2, 2, (i & 3) ? K_LINE : K_DIM);
+        }
+    }
+    text_c(120, 128, &FONT_XS, en_playing ? "C4 ALL  D4 BACK  E4 SAVE  OCT KEY" : "PRESS PLAY, OR START THE DIGITAKT",
+           en_playing ? K_DIM : K_ACC);
+}
+#endif
+
 static void draw_main(void)
 {
     uint32_t now = plat_ms(), h = hash(2166136261u, (uint32_t)en_frozen << 16 | proj.piece << 24 | (uint32_t)en_playing << 17), i;
@@ -2617,6 +2979,27 @@ static void draw_main(void)
         return;
     }
     ui.grid_said = 0;
+#if EN_LIVE
+    if (ui.perf && ui.view == V_PERF) {          /* LIVE: the four layers */
+        char nm[12];
+        h = hash(hash(0x4C495645u, ui.mutes | lv_pmask << 8), (uint32_t)en_drum_pos[0] | (uint32_t)en_playing << 5 |
+                 (uint32_t)((plat_ms() / 200u) & 1u) << 6);
+        h = hash(hash(h, (uint16_t)proj.par[P_LSTAB] | (uint32_t)(uint16_t)proj.par[P_DPAT1] << 16),
+                 (uint16_t)proj.par[P_DPAT2] | (uint32_t)(uint16_t)proj.par[P_DPAT3] << 16);
+        h = hash(hash(h, (uint32_t)proj.par[P_GROOVE]), (uint32_t)(chord_now(nm)[0]) | (uint32_t)nm[1] << 8 | (uint32_t)nm[2] << 16);
+        for (i = 0; i < LV_N; i++)
+            h = hash(h, lv_flash_t[i] && plat_ms() - lv_flash_t[i] < 350u);
+        h = hash(h, (uint32_t)oct_ring_on(now) | (now < ui.card_until + 700u ? now / 40u : 0u) << 1);
+        if (h != ui.sig[1]) {
+            ui.sig[1] = h;
+            cv_begin(240, MAIN_H, K_BG);
+            draw_live();
+            draw_card(now);
+            cv_blit(0, MAIN_Y);
+        }
+        return;
+    }
+#endif
     if (ui.view == V_PAT) {                      /* the Pattern page: the steps */
         h = hash(hash(0x50415454u, ui.lane | (uint32_t)proj.par[P_DMODE] << 4 | (uint32_t)en_drum_pos[0] << 8), en_playing);
         for (i = 0; i < EN_NDRUM; i++)
@@ -2907,7 +3290,27 @@ static void leds(void)
         for (i = 0; i < EN_NFX; i++)
             if (!(i & 3) || (ui.fx >> i & 1u))
                 k |= 1u << FX_KEY[i];
+#if EN_LIVE
+    } else if (ui.perf) {                        /* LIVE: the layers that sound (black), the rolls (white), BACK while
+                                                  * there's one, SAVE blinking while unsaved */
+        b |= 1u << B_SEL;
+        for (i = 0; i < LV_N; i++) {
+            if (!(ui.mutes & LV_MUTE[i]))
+                k |= 1u << LV_BLACK[i];
+            if (!lv_flash_t[i] || plat_ms() - lv_flash_t[i] > 200u)
+                k |= 1u << LV_WHITE[i];
+        }
+        k |= 1u << LV_ALL;
+        if (lv_has_prev)
+            k |= 1u << LV_BACK;
+        if (!ui.dirty || (plat_ms() / 400u) & 1u)
+            k |= 1u << LV_SAVE;
+        if (lv_pmask && (plat_ms() / 120u) & 1u)   /* (a roll waiting for the bar: the keys flicker) */
+            k |= 1u << LV_ALL;
+#else
     } else if (ui.perf) {                        /* PERFORM: the layers heard, the solos, the moves (dark while held) */
+#endif
+#if !EN_LIVE
         const int blink = (plat_ms() / 250u) & 1u;
         b |= 1u << B_SEL;
         if (ui.view != V_MIX && (plat_ms() / 450u) & 1u)   /* white 6: blinking, slower than a solo, to be found;
@@ -2921,6 +3324,7 @@ static void leds(void)
             if (!(ui.solo >> i & 1u) || blink)
                 k |= 1u << PERF_KEY[10 + i];
         }
+#endif
 
     } else if (proj.leds) {
         for (i = 0; i < NKEYS; i++)
@@ -3373,9 +3777,17 @@ void ui_init(void)
     memset(&ui, 0, sizeof ui);
     ui.touched = -1;
     lcd_fill(0, 0, 240, 240, K_BG);
+#if EN_LIVE
+    ui.mutes = EN_M_KICK;                        /* LIVE: no kick (the Digitakt's), the live page up, waiting for the
+                                                  * Digitakt's start or PLAY */
+    perf_mutes();
+    perf_set(1);
+    sp_tp.playing = en_playing;
+#else
     if (!en_playing)
         en_play(1);                              /* it plays from the start */
     sp_tp.playing = 1;
+#endif
     sp_tp.play_t = plat_ms();
 }
 
